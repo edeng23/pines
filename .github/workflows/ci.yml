@@ -1,0 +1,78 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+jobs:
+  test:
+    name: test (${{ matrix.os }}, node ${{ matrix.node }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # Matches the `engines` range (>=22.19.0 <25). The floor is not ours:
+        # @earendil-works/pi-* require >=22.19.0, and their undici dependency
+        # calls webidl.util.markAsUncloneable, which does not exist before
+        # Node 21 — so Node 20 fails at import, not at runtime.
+        # macOS is here because it is the likely primary platform for a
+        # terminal tool and where node-pty / better-sqlite3 break.
+        os: [ubuntu-latest, macos-latest]
+        node: [22, 24]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - run: pnpm typecheck
+      - run: pnpm test
+
+  package:
+    # Guards the published tarball: `files` must carry everything the daemon
+    # reads at runtime (dist/, the pi extension source, and schema.sql).
+    # Catching this here is the difference between a bad release and a red CI run.
+    name: package smoke
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - name: Pack and install the tarball into a clean project
+        run: |
+          set -euo pipefail
+          tarball="$(pwd)/$(npm pack --silent)"
+          echo "packed: $tarball"
+          consumer="$(mktemp -d)"
+          cd "$consumer"
+          npm init -y >/dev/null
+          npm install --no-audit --no-fund "$tarball"
+          echo "--- installed tree ---"
+          ls -R node_modules/@edeng23/pines | head -40
+      - name: Assert runtime assets survived packing
+        run: |
+          set -euo pipefail
+          tarball="$(pwd)/$(npm pack --silent)"
+          contents="$(tar -tzf "$tarball")"
+          for required in \
+            package/dist/cli.js \
+            package/src/store/schema.sql \
+            package/src/extension/pines-extension.ts
+          do
+            echo "$contents" | grep -qx "$required" \
+              || { echo "MISSING from tarball: $required"; exit 1; }
+          done
+          echo "all runtime assets present"

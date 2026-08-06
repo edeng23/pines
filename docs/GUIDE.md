@@ -1,0 +1,271 @@
+# pines — full guide
+
+**pi + trees.** A tree-first orchestration TUI for [pi](https://pi.dev) coding agents.
+*(Looking for the quick start? See the [README](../README.md).)*
+
+Your conversations *are* trees — pi stores every session as an append-only tree of
+messages you can branch anywhere. pines makes that structure the primary interface:
+the main view is a **forest**, a zoomable map of every conversation tree, with
+live color-coded agent status on each one. Enter a tree to get the **real pi TUI**;
+leave it and the agent **keeps running in the background**.
+
+```
+            ◐ auth-fix                        ready to zoom, pan, click
+        ⡠⠔⠉                                  ● teal  = waiting for you (unseen)
+   ● render-perf                              ◐ yellow = agent working
+                     ○ docs-cleanup           ○ green = seen / done
+        · archive-migration                   · gray  = dormant (no process)
+```
+
+## Why
+
+- pi's built-in `/tree` view is powerful but hard to navigate and not visual.
+- Leaving a pi session pauses it. pines fixes that with a background daemon that
+  owns every pi process — detaching is just closing a socket, no tmux involved.
+- Status is **exact**, not screen-scraped: a tiny pines extension rides inside
+  each spawned pi and reports `agent_start` / `agent_settled` events directly.
+
+## Install & run
+
+Requires Node 22.19+ (up to 24) — the floor comes from `@earendil-works/pi-*`,
+which pines bundles. Pines includes a compatible `pi` runtime; an independently
+installed global `pi` is not required.
+
+```sh
+npx @edeng23/pines
+
+# or install the command globally
+npm i -g @edeng23/pines
+pines
+```
+
+From a source checkout:
+
+```sh
+pnpm install && pnpm build
+node dist/cli.js
+
+# optional: expose the `pines` command globally
+npm link
+pines
+```
+
+- `pines` — open the forest (auto-starts the daemon). Launch plays a short
+  germination splash while the daemon connects — any key skips it, and it
+  reports how many agents kept running while you were away. Disable it with
+  `"boot": "off"` in `~/.pines/config.json` (or `PINES_BOOT=off`).
+- `pines spawn --cwd ~/proj --name auth-fix --prompt "fix the tests"` — spawn a background tree
+- `pines status` / `pines kill` — inspect / stop the daemon (and its agents)
+
+Sessions you run with plain `pi` (outside pines) appear in the forest
+automatically as dormant trees, via a watcher on `~/.pi/agent/sessions`.
+
+## Navigation
+
+Three levels: **Forest ⇄ Tree ⇄ Node (attached pi)**. Arrow keys navigate the
+hierarchy like columns in a file browser: `→` descends (forest → tree → pi),
+`←` ascends, `↑`/`↓` move the selection. `Enter`/`Esc` still work everywhere.
+Inside pi the arrows belong to pi itself, so ascending from there is
+`Ctrl+t ←` (or `Ctrl+t d`).
+
+The forest screen is split: an **agents sidebar** on the left (a state-grouped
+list of every tree — needs input first, then working, then recent — each row
+showing status, name, and age) and the spatial canvas on the right. The two
+share one selection: moving in the list pans the camera only when the tree is
+off-screen. `S` toggles the sidebar, `[`/`]` resize it, or drag the divider;
+width and visibility persist in `~/.pines/ui.json`.
+
+The canvas has five **looks** — same layout and same status colors, different
+ways of reading the map. `v` cycles them, `V` opens the picker, and the choice
+persists in `~/.pines/ui.json`:
+
+| look | what it's going for |
+|---|---|
+| `canopy` | *(default)* a forester's plat — sunlit pines on graph paper, lineage surveyed in right angles |
+| `classic` | status dot + name, braille lineage threads |
+| `constellation` | a star chart: brightness by size, curved lineage arcs |
+| `cards` | one dense chip per tree — status bar, name, age |
+| `contour` | a topographic map: live and unseen work rises into elevation rings |
+
+In `canopy` a tree grows with the conversation behind it — four sizes from
+sapling to old growth — lit from the upper left, in one of a few near-greens
+picked from its id so a hillside never looks tiled. A session with no process
+behind it loses its needles and stands as winter wood; a crashed one stands
+ember red; work you haven't seen lights the crown's tip. Underneath, the
+graph paper and the right-angle lineage of the old `blueprint` look: survey
+lines run tree to tree and disappear behind the wood.
+
+**Try them without touching your sessions:**
+
+```sh
+pnpm build && pnpm demo      # a throwaway forest under ~/.pines-demo
+```
+
+`pnpm demo` generates ~18 sessions across three projects — including one
+branched conversation (“plan the v1 release”: sibling branches, a branch of
+a branch, and a parked fork — open it with `→` to see the one-tree merge,
+agent tips, and the metro map) — and starts three
+simulated agents (the test suite's fake pi — no model is ever called), then
+opens the forest on that sandbox: its own daemon, socket, database and sessions
+directory. Cycle looks with `v`, pick one with `V`, `x` kills an agent, `n`
+starts another. `pnpm demo --trees 60` for a crowded forest, `--reset` to start
+over, and `rm -rf ~/.pines-demo` to erase the whole thing.
+
+In a crowded forest every look names the live, unseen, and crashed sessions
+first and leaves the rest as glyphs — names shorten as trees pack together, and
+zooming in hands them back. Compare the looks without running anything:
+
+```sh
+pnpm tsx scripts/forest-preview.ts --list             # scenarios and looks
+pnpm tsx scripts/forest-preview.ts --scenario busy    # one scenario, every look
+pnpm tsx scripts/forest-preview.ts --style canopy     # one look, every scenario
+pnpm tsx scripts/forest-preview.ts --html looks.html  # side by side in a browser
+```
+
+The scenarios cover a working day, a quiet forest, forty sessions at once, a
+branched conversation, an 80-column terminal with the sidebar open, mid zoom,
+and a first run — all placed by the same layout the daemon uses.
+
+| view | keys / mouse |
+|---|---|
+| forest | `↑`/`↓` move through the sidebar list · `Enter` attach · `→` open tree view · wheel = zoom at cursor · drag = pan · click = select · double-click = open (canvas) / attach (sidebar) · `hjkl` pan · `+`/`-` zoom · `0` fit · `Tab` cycle by attention · `o` jump to most urgent · `a` attach · `n` new tree and attach · `L` rename tree · `A`/`Ctrl+X` archive/unarchive · `.` show/hide archived · `S` sidebar · `[`/`]` sidebar width · `v`/`V` look · `x` kill agent · `R` relayout · `s` similar conversations · `/` search · `?` help |
+| tree | `↑`/`↓` or `j`/`k` move · `→`/`Enter` — on a tip (a node showing an agent's status): attach to that branch's agent (resume if dormant); on a `⋯` row: expand; on a `[+]` row: unfold; on any other message: grow a new branch there with its own agent and attach · `1`-`9` jump to a branch tip · `←`/`Esc` back to the forest · `b` branch menu (with/without agent) · `L` label · `/` search |
+| attached pi | everything goes to pi, except the prefix `Ctrl+t`: `←`/`d` = back to tree · `f` = forest · `n` = next attention target · `Ctrl+t Ctrl+t` = send a literal Ctrl+t |
+
+Zooming is semantic: the sprite is the tree at every distance — maturity by
+conversation size, life by color — and it fills out from a glyph to old
+growth as you close in; zooming all the way into a tree opens it. Branch
+structure lives inside: the conversation view and its metro map.
+
+The tree view is a classic ascii tree (`├─` / `└─`): user turns start at their
+branch margin, replies nest one step, tool runs elide to `⚙ ⋯ n steps`, and
+only forks add lasting indent. When a session outgrows the screen, scale rules
+engage automatically: the active path pins to its margin (no indent drift),
+non-active branches fold to one `· N msgs · age [+]` row each, and a minimap
+strip appears on the right edge. Small trees always render in full.
+
+**A conversation is ONE tree.** Branching materializes a new session file
+under the hood — that's how a branch gets its own agent, running in
+parallel, never blocking anyone — but the files are plumbing: pines merges
+the whole family back into a single message tree (forked files share their
+entry ids up to the branch point, so the merge is lossless). The forest
+shows one item per conversation, colored by the family's most
+attention-worthy member.
+
+Inside, the conversation is one ascii tree. Nodes where a branch currently
+ends are **tips**: they carry that branch's live agent status (`◐ working`,
+`● needs input`, …) right on the tree. When more than one agent lives on
+the tree, a left panel lists them — agents, not messages — and `1`-`9` or a
+click moves the cursor to exactly that tip. Above the list, a metro-style
+map draws the branch structure: rounded routes, one color per branch line,
+agents as stations you can click; the station nearest your cursor lights up
+as a you-are-here marker.
+
+`n` starts a new daemon-hosted pi in the current directory and immediately
+opens its real TUI inside pines. `Ctrl+t f` returns to the forest while that pi
+continues running. Use `pines spawn --cwd …` when you explicitly want a
+background-only launch.
+
+**Branching** (`b` on any message, or just `Enter` on a non-tip message):
+grows a new branch of the same tree, optionally with an agent on it.
+Branches never touch each other's agents, so branching while one works is
+always possible — that is the multiplexing model. (In-place leaf moves
+still exist in the daemon for pi's own navigation.)
+
+**Search** (`/`): SQLite FTS5 over session names, every user message (abandoned
+branches included), compaction/branch summaries, and labels. `Enter` jumps to
+the exact tree and node.
+
+**Archiving** (`A`): finished trees leave the canvas and sidebar without losing
+anything — the session file, search index, and lineage all stay. `.` reveals
+the archived group at the bottom of the sidebar; `A` again (or resuming the
+tree, from anywhere) un-archives it. Trees with a live agent refuse to archive:
+kill the agent first (`x`).
+
+## Semantic layout
+
+Trees that talk about similar things sit near each other. Each tree is
+embedded locally (MiniLM q8, ~23 MB, downloaded once to `~/.pines/models`,
+runs in a worker thread) from its *essence*: the name and labels, every user
+message, compaction/branch summaries, and a digest of the tool activity (which
+files the agent worked on, which tools it ran). Each piece embeds once —
+cached per chunk, so a growing session only embeds its new messages — and the
+tree vector is a recency-weighted pool: recent turns dominate, but the opening
+prompt keeps a floor weight, so a chat that drifted from "fix auth" to
+"rewrite the parser" sits between those topics, leaning where it actually went.
+
+Vectors are projected to 2-D with a cached PCA basis and nudged apart with
+overlap relaxation. New trees project through the cached basis so **existing
+trees never jump**; `R` refits. Offline or before the model warms, a
+deterministic lexical layout (cwd clusters on a spiral, recency rings) applies
+— the forest always loads instantly.
+
+**Similar trees** (`s`): ranks the forest by cosine similarity to the selected
+tree (same embeddings, brute force — instant at forest scale) and jumps the
+camera to the picked neighbor.
+
+## Configuration
+
+`~/.pines/config.json` (all optional):
+
+```json
+{
+  "prefixKey": "ctrl+t",
+  "boot": "off",
+  "maxLiveAgents": 12,
+  "piBin": "/path/to/custom/pi",
+  "embedModel": "Xenova/bge-small-en-v1.5"
+}
+```
+
+`embedModel` swaps the local embedding model (default MiniLM;
+`Xenova/bge-small-en-v1.5` is a known-good 384-d quality upgrade). Changing it
+re-embeds everything on the next daemon start.
+
+`piBin` is an optional development/custom-runtime override; by default pines
+uses its bundled, version-matched pi. Env overrides: `PINES_HOME`, `PINES_SOCK`,
+`PINES_PI_BIN`, `PINES_PI_SESSIONS`.
+Using tmux? Enable its mouse mode (`set -g mouse on`) to pass wheel events through.
+
+## Architecture
+
+```
+ pines (thin client, your terminal)      pi processes (PTYs)
+   forest/tree canvas + pi passthrough      │  each loaded with -e pines-extension.ts
+        │ NDJSON over unix socket           │  (reports exact status + runs commands)
+        ▼                                   ▼
+ pines daemon (detached, survives terminal close)
+   owns PTYs (@xterm/headless screen state) · SQLite (forest, FTS5, embeddings)
+   session watcher (~/.pi/agent/sessions) · embedding worker (MiniLM)
+```
+
+- One Unix socket (`~/.pines/pines.sock`), role handshake (client vs extension),
+  protocol-version guard. Detach = drop the socket; processes never stop.
+- A *tree* is a pi session JSONL on disk; an *agent* is a pi process bound to
+  one. Trees are dormant by default; kill -9 the daemon and everything comes
+  back dormant from SQLite on restart.
+- Ownership rule: a live tree's JSONL is written only by its pi process (via the
+  extension); dormant trees only via pi's SDK. pines never hand-writes session files.
+
+## Development
+
+```sh
+pnpm test          # unit + integration (spawns real daemons with a scripted fake pi)
+pnpm typecheck
+node scripts/gen-sessions.mjs --topics 3 --per 8   # populate a demo forest
+```
+
+## Roadmap
+
+- **Graft (v2):** spawn a tree from *two* nodes of different trees, mixing both
+  contexts. The data model already carries n-parent provenance
+  (`graft_parents`, `pines.graft` custom entries); the mixing strategy and the
+  two-node picker are next.
+- Crashed-agent final-screen peek, client-side position tweening, copy mode.
+
+## Credits
+
+- [pi](https://pi.dev) by Mario Zechner — the agent, the session tree format,
+  and the extension API that makes exact status reporting possible.
+
+Apache-2.0.
