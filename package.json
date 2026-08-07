@@ -1,6 +1,6 @@
 {
   "name": "@edeng23/pines",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Tree-first orchestration TUI for pi coding agents. pi + trees = pines.",
   "license": "Apache-2.0",
   "author": "Eden Gaon",
@@ -51,8 +51,8 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@earendil-works/pi-coding-agent": "0.82.0",
-    "@earendil-works/pi-tui": "0.82.0",
+    "@earendil-works/pi-coding-agent": "0.84.1",
+    "@earendil-works/pi-tui": "0.84.1",
     "@xterm/addon-serialize": "^0.14.0",
     "@xterm/headless": "^6.0.0",
     "better-sqlite3": "^13.0.1",
