@@ -1,0 +1,94 @@
+name: Release
+
+# Cutting a release is `git tag v0.2.0 && git push origin v0.2.0`. Nothing
+# publishes on a branch push — only a v* tag reaches this workflow.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write # create the GitHub release
+  id-token: write # mint the OIDC token npm trusted publishing exchanges for a credential
+
+jobs:
+  release:
+    name: publish @edeng23/pines
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # --generate-notes diffs against the previous tag, which needs more
+          # than the shallow single commit checkout gives us by default.
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          registry-url: https://registry.npmjs.org
+
+      # Trusted publishing needs npm >= 11.5.1. Node 22 still bundles npm 10.x,
+      # which has no idea what an OIDC exchange is and falls back to asking for
+      # a token that does not exist here.
+      - name: Upgrade npm for trusted publishing
+        run: |
+          npm install -g npm@latest
+          npm --version
+
+      # A tag that disagrees with package.json ships the wrong version number,
+      # and npm burns a version forever — it can never be republished, even
+      # after an unpublish. Cheaper to fail here than to skip to 0.1.1.
+      - name: Assert tag matches package.json version
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME#v}"
+          pkg="$(node -p "require('./package.json').version")"
+          if [ "$tag" != "$pkg" ]; then
+            echo "tag ${GITHUB_REF_NAME} implies version ${tag}, package.json says ${pkg}"
+            exit 1
+          fi
+          echo "releasing ${pkg}"
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - run: pnpm typecheck
+      - run: pnpm test
+
+      # Same guard as CI's `package` job. It runs again here because CI green on
+      # a branch does not prove the tagged tree still packs correctly, and a
+      # tarball missing schema.sql dies in openDb before the daemon ever binds.
+      - name: Assert runtime assets survived packing
+        run: |
+          set -euo pipefail
+          tarball="$(pwd)/$(npm pack --silent)"
+          contents="$(tar -tzf "$tarball")"
+          for required in \
+            package/dist/cli.js \
+            package/src/store/schema.sql \
+            package/src/extension/pines-extension.ts
+          do
+            echo "$contents" | grep -qx "$required" \
+              || { echo "MISSING from tarball: $required"; exit 1; }
+          done
+          echo "all runtime assets present"
+
+      # --ignore-scripts skips prepublishOnly, whose typecheck+test we just ran
+      # explicitly above. Running that suite twice only doubles the exposure to
+      # the flaky timing tests; it proves nothing new. No prepack/prepare exist,
+      # so nothing else is being skipped.
+      # --provenance is explicit: relying on npm to infer it from CI has been
+      # unreliable in practice.
+      - name: Publish to npm
+        run: npm publish --provenance --access public --ignore-scripts
+
+      # After the publish, so a failed publish does not strand a GitHub release
+      # pointing at a version nobody can install.
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            --title "$GITHUB_REF_NAME" \
+            --generate-notes
