@@ -4,35 +4,21 @@
  * sessions created outside pines.
  */
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { spawn, type ChildProcess } from "node:child_process";
+import { type ChildProcess } from "node:child_process";
 import { connect, type Socket } from "node:net";
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import { Wire } from "../src/shared/wire.js";
 import { PROTOCOL_VERSION } from "../src/shared/protocol.js";
 import { branchedSession } from "./fixtures/sessions.js";
-
-const HERE = dirname(fileURLToPath(import.meta.url));
-const ROOT = join(HERE, "..");
-const FAKE_PI = join(HERE, "fixtures", "fake-pi.mjs");
+import { FAKE_PI, startDaemon, waitFor } from "./fixtures/daemon.js";
 
 let home: string;
 let sessionsRoot: string;
 let fixtureSession: string;
 let daemon: ChildProcess;
 let sockPath: string;
-
-async function waitFor<T>(fn: () => T | undefined, timeoutMs = 10_000, what = "condition"): Promise<T> {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    const v = fn();
-    if (v !== undefined) return v;
-    await new Promise((r) => setTimeout(r, 40));
-  }
-  throw new Error(`timeout waiting for ${what}`);
-}
 
 function connectClient(): Promise<{ wire: Wire; sock: Socket; inbox: unknown[] }> {
   return new Promise((resolve, reject) => {
@@ -62,29 +48,18 @@ beforeAll(async () => {
   fixtureSession = join(dir, "2026-01-01T00-00-00-000Z_11111111.jsonl");
   writeFileSync(fixtureSession, branchedSession("/tmp/proj").content);
 
-  sockPath = join(home, "pines.sock");
   chmodSync(FAKE_PI, 0o755);
-  daemon = spawn(process.execPath, [join(ROOT, "dist", "cli.js"), "server"], {
+  const started = await startDaemon({
+    home,
     env: {
-      ...process.env,
-      PINES_HOME: home,
       PINES_PI_BIN: FAKE_PI,
       PINES_PI_SESSIONS: sessionsRoot,
       FAKE_PI_EXT: "1",
       FAKE_PI_SESSION: fixtureSession,
     },
-    stdio: "ignore",
   });
-  await waitFor(() => {
-    try {
-      const c = connect(sockPath);
-      c.on("error", () => {});
-      return true as const;
-    } catch {
-      return undefined;
-    }
-  });
-  await new Promise((r) => setTimeout(r, 500));
+  daemon = started.proc;
+  sockPath = started.sockPath;
 });
 
 afterAll(() => {

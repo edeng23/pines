@@ -4,20 +4,15 @@
  * is connected.
  */
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { spawn, type ChildProcess } from "node:child_process";
+import { type ChildProcess } from "node:child_process";
 import { connect, type Socket } from "node:net";
 import { mkdtempSync, rmSync, chmodSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import xterm from "@xterm/headless";
-import { fileURLToPath } from "node:url";
-import { dirname } from "node:path";
 import { Wire } from "../src/shared/wire.js";
 import { PROTOCOL_VERSION } from "../src/shared/protocol.js";
-
-const HERE = dirname(fileURLToPath(import.meta.url));
-const ROOT = join(HERE, "..");
-const FAKE_PI = join(HERE, "fixtures", "fake-pi.mjs");
+import { FAKE_PI, startDaemon, waitFor } from "./fixtures/daemon.js";
 
 let home: string;
 let daemon: ChildProcess;
@@ -37,16 +32,6 @@ function connectClient(): Promise<{ wire: Wire; sock: Socket; inbox: unknown[] }
   });
 }
 
-async function waitFor<T>(fn: () => T | undefined, timeoutMs = 8000, what = "condition"): Promise<T> {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    const v = fn();
-    if (v !== undefined) return v;
-    await new Promise((r) => setTimeout(r, 30));
-  }
-  throw new Error(`timeout waiting for ${what}`);
-}
-
 function findResult(inbox: unknown[], re: string): Record<string, unknown> | undefined {
   return inbox.find(
     (m): m is Record<string, unknown> =>
@@ -56,24 +41,10 @@ function findResult(inbox: unknown[], re: string): Record<string, unknown> | und
 
 beforeAll(async () => {
   home = mkdtempSync(join(tmpdir(), "pines-test-"));
-  sockPath = join(home, "pines.sock");
   chmodSync(FAKE_PI, 0o755);
-  daemon = spawn(process.execPath, [join(ROOT, "dist", "cli.js"), "server"], {
-    env: { ...process.env, PINES_HOME: home, PINES_PI_BIN: FAKE_PI },
-    stdio: "ignore",
-  });
-  // Wait for the socket to accept connections.
-  await waitFor(() => {
-    try {
-      const c = connect(sockPath);
-      c.on("error", () => {});
-      return true as const;
-    } catch {
-      return undefined;
-    }
-  });
-  // Give the listener a moment to actually bind.
-  await new Promise((r) => setTimeout(r, 300));
+  const started = await startDaemon({ home, env: { PINES_PI_BIN: FAKE_PI } });
+  daemon = started.proc;
+  sockPath = started.sockPath;
 });
 
 afterAll(() => {

@@ -3,18 +3,15 @@
  * (createBranchedSession), and durable in-place branch on a dormant tree.
  */
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { spawn, type ChildProcess } from "node:child_process";
+import { type ChildProcess } from "node:child_process";
 import { connect, type Socket } from "node:net";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import { Wire } from "../src/shared/wire.js";
 import { PROTOCOL_VERSION } from "../src/shared/protocol.js";
 import { branchedSession } from "./fixtures/sessions.js";
-
-const HERE = dirname(fileURLToPath(import.meta.url));
-const ROOT = join(HERE, "..");
+import { startDaemon, waitFor } from "./fixtures/daemon.js";
 
 let home: string;
 let sessionsRoot: string;
@@ -22,16 +19,6 @@ let fixtureSession: string;
 let fixtureIds: Record<string, string>;
 let daemon: ChildProcess;
 let sockPath: string;
-
-async function waitFor<T>(fn: () => T | undefined, timeoutMs = 10_000, what = "condition"): Promise<T> {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    const v = fn();
-    if (v !== undefined) return v;
-    await new Promise((r) => setTimeout(r, 40));
-  }
-  throw new Error(`timeout waiting for ${what}`);
-}
 
 interface TestClient {
   wire: Wire;
@@ -88,21 +75,9 @@ beforeAll(async () => {
   fixtureIds = fixture.ids;
   writeFileSync(fixtureSession, fixture.content);
 
-  sockPath = join(home, "pines.sock");
-  daemon = spawn(process.execPath, [join(ROOT, "dist", "cli.js"), "server"], {
-    env: { ...process.env, PINES_HOME: home, PINES_PI_SESSIONS: sessionsRoot },
-    stdio: "ignore",
-  });
-  await waitFor(() => {
-    try {
-      const c = connect(sockPath);
-      c.on("error", () => {});
-      return true as const;
-    } catch {
-      return undefined;
-    }
-  });
-  await new Promise((r) => setTimeout(r, 500));
+  const started = await startDaemon({ home, env: { PINES_PI_SESSIONS: sessionsRoot } });
+  daemon = started.proc;
+  sockPath = started.sockPath;
 });
 
 afterAll(() => {
