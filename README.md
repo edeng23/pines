@@ -2,7 +2,7 @@
 
 **pi + trees.** A tree-first TUI for [pi](https://pi.dev) coding agents.
 
-![pines: a forest of pi sessions — live agent status, five looks, tree view](docs/demo.gif)
+![pines: a forest of pi sessions — live agent status, zoomable forest, tree view](docs/demo.gif)
 
 Needs Node 22.19+ (up to 24). Ships with its own `pi` runtime.
 
