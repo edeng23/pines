@@ -1,29 +1,18 @@
 /**
- * The forest's visual options.
- *
- * Same layout, same status vocabulary, six different ways of reading the map:
- *
- *   classic        status dot + name, braille lineage threads (the original)
- *   canopy         a forester's plat: sunlit pines on graph paper
- *   constellation  a star chart: brightness by size, curved lineage arcs
- *   cards          one dense chip per tree: status bar, name, age
- *   contour        a topographic map — activity as elevation rings
- *
- * Adding a sixth is a matter of one object in this file: the renderer only
- * knows the `ForestStyle` contract.
+ * The forest's look: canopy — a forester's plat, sunlit pines on graph paper,
+ * lineage surveyed in right angles. (Earlier versions offered several looks;
+ * canopy is the one the project is named for, and now the only one.)
  */
 import type { TreeSummary } from "../../shared/types.js";
 import type { Canvas } from "./canvas.js";
 import { FAINT, GRID, MUTED } from "../theme.js";
 import { statusGlyph, statusSgr } from "./status.js";
-import { humanAge, treeTitle } from "./sidebar.js";
+import { treeTitle } from "./sidebar.js";
 import {
-  LabelPlacer,
   fitText,
   truncate,
   type DrawCtx,
   type ForestStyle,
-  type ForestStyleId,
   type Point,
   type Rect,
 } from "./style.js";
@@ -47,39 +36,6 @@ function label(canvas: Canvas, c: DrawCtx, x: number, y: number, text: string, s
   if (shown) canvas.text(x, y, shown, sgr, c.pickId);
 }
 
-/* ------------------------------- classic --------------------------------- */
-
-const classic: ForestStyle = {
-  id: "classic",
-  name: "classic",
-  blurb: "status dot + name, braille lineage threads",
-
-  footprint(t, pos, o) {
-    const label = o.selected
-      ? ` ▸ ${treeTitle(t).title} `
-      : ` ${truncate(treeTitle(t).title, o.nameMax)}`;
-    return { x: pos.x, y: pos.y, w: 1 + label.length, h: 1 };
-  },
-
-  drawTree(canvas, c) {
-    const sgr = statusSgr(c.t);
-    canvas.set(
-      c.pos.x,
-      c.pos.y,
-      statusGlyph(c.t, c.spinnerFrame),
-      c.selected ? `7;${sgr}` : sgr,
-      c.pickId,
-    );
-    if (c.selected) {
-      label(canvas, c, c.pos.x + 1, c.pos.y, ` ▸ ${c.title} `, "1;7");
-    } else if (c.roomy) {
-      label(canvas, c, c.pos.x + 1, c.pos.y, ` ${shownName(c)}`, nameSgr(c));
-    }
-  },
-};
-
-/* -------------------------------- canopy --------------------------------- */
-
 /**
  * Trees.
  *
@@ -102,7 +58,7 @@ interface Sprite {
 }
 
 /**
- * Needled, for a session with a process behind it.
+ * Needled — every living conversation, dormant or not.
  *
  * Even the smallest is a whole tree: a forest of one-cell triangles reads as
  * punctuation, not as a wood. Size still varies — it is how the map shows you
@@ -127,19 +83,19 @@ const PINE_M: Sprite = { trunk: 1, rows: [" ▲ ", "▟█▙"], tones: [" 0 ", 
 /** Only for a forest with no room left at all. */
 const PINE_S: Sprite = { trunk: 0, rows: ["▲"], tones: ["1"] };
 
-/** Bare: no process, no needles. Dormant work reads as winter wood. */
+/** Bare: only a crashed session loses its needles — burnt wood, unmistakable. */
 const BARE_XL: Sprite = {
   trunk: 2,
   rows: ["╲ │ ╱", " ╲│╱ ", "  │  "],
   tones: ["0 1 0", " 010 ", "  2  "],
 };
+const BARE_M: Sprite = { trunk: 1, rows: ["╲│╱", " │ "], tones: ["010", " 2 "] };
+const BARE_S: Sprite = { trunk: 0, rows: ["╵"], tones: ["1"] };
 const BARE_L: Sprite = {
   trunk: 2,
   rows: ["╲ │ ╱", " ╲│╱ "],
   tones: ["0 1 0", " 010 "],
 };
-const BARE_M: Sprite = { trunk: 1, rows: ["╲│╱", " │ "], tones: ["010", " 2 "] };
-const BARE_S: Sprite = { trunk: 0, rows: ["╵"], tones: ["1"] };
 
 const PINES: Sprite[] = [PINE_S, PINE_M, PINE_L, PINE_XL, PINE_XXL];
 const BARES: Sprite[] = [BARE_S, BARE_M, BARE_L, BARE_XL, BARE_XL];
@@ -159,21 +115,30 @@ const FOLIAGE: Palette[] = [
   ["38;5;113", "38;5;70", "38;5;28"], // sunlit lime
 ];
 
-/** Winter wood for dormant sessions: warm bark, dark heartwood. */
-const BARK_TONES: Palette = ["38;5;180", "38;5;137", "38;5;95"];
+/**
+ * A dormant session keeps its needles — the conversation is asleep, not dead;
+ * a whole forest goes dormant on every daemon restart, and it must still read
+ * as a forest. The green just goes muted, wintered-over.
+ */
+const WINTER_TONES: Palette = ["38;5;108", "38;5;65", "38;5;59"];
 
 /** A crashed session stands as burnt wood — ember red, unmistakable. */
 const EMBER_TONES: Palette = ["38;5;203", "38;5;167", "38;5;124"];
 
 function paletteOf(t: TreeSummary): Palette {
   if (t.status === "crashed") return EMBER_TONES;
-  if (t.status === "dormant") return BARK_TONES;
+  if (t.status === "dormant") return WINTER_TONES;
   let h = 2166136261;
   for (let i = 0; i < t.treeId.length; i++) {
     h ^= t.treeId.charCodeAt(i);
     h = Math.imul(h, 16777619);
   }
   return FOLIAGE[(h >>> 0) % FOLIAGE.length]!;
+}
+
+/** Bare is reserved for the one state that means the tree burned. */
+function isBare(t: TreeSummary): boolean {
+  return t.status === "crashed";
 }
 
 /**
@@ -229,7 +194,7 @@ function drawSprite(
   }
 }
 
-const canopy: ForestStyle = {
+export const canopy: ForestStyle = {
   id: "canopy",
   name: "canopy",
   blurb: "a forester's plat — sunlit pines on graph paper, surveyed lineage",
@@ -277,15 +242,13 @@ const canopy: ForestStyle = {
   // Foliage occupies real cells, so the whole tree is off limits to labels —
   // at exactly the size this forest will draw it.
   core: (t, pos, spacing) => {
-    const bare = t.status !== "running" && t.status !== "waiting";
-    const box = spriteRect(spriteFor(t, bare, spacing), pos);
+    const box = spriteRect(spriteFor(t, isBare(t), spacing), pos);
     return { x: box.x, y: box.y, w: box.w, h: box.h + 1 };
   },
 
   footprint(t, pos, o) {
-    const bare = t.status !== "running" && t.status !== "waiting";
     // Claim the tree as drawn, plus room for the name beside its base.
-    const box = spriteRect(spriteFor(t, bare, o.spacing), pos);
+    const box = spriteRect(spriteFor(t, isBare(t), o.spacing), pos);
     const label = ` ${o.selected ? treeTitle(t).title : truncate(treeTitle(t).title, o.nameMax)} `;
     const x = Math.min(box.x, Math.round(pos.x));
     return {
@@ -298,8 +261,7 @@ const canopy: ForestStyle = {
 
   drawTree(canvas, c) {
     const sgr = statusSgr(c.t);
-    const bare = c.t.status === "dormant" || c.t.status === "crashed";
-    const sprite = spriteFor(c.t, bare, c.spacing);
+    const sprite = spriteFor(c.t, isBare(c.t), c.spacing);
     drawSprite(canvas, sprite, c.pos, paletteOf(c.t), c.pickId, c.selected);
     // Work you have not looked at yet lights the crown, so attention reads
     // from across the map without repainting the whole tree.
@@ -328,227 +290,3 @@ const canopy: ForestStyle = {
     label(canvas, c, c.pos.x + 1, row, text, c.selected ? "1;7" : nameSgr(c));
   },
 };
-
-/* ----------------------------- constellation ------------------------------ */
-
-/** Stars brighten with session size; the state glyph still wins for live work. */
-function starGlyph(t: TreeSummary, spinnerFrame: number): string {
-  if (t.status === "running") return statusGlyph(t, spinnerFrame);
-  if (t.status === "crashed") return "✸";
-  if (t.status === "dormant") return t.nodeCount >= 12 ? "✧" : "·";
-  return t.nodeCount >= 12 ? "✦" : "✧";
-}
-
-const constellation: ForestStyle = {
-  id: "constellation",
-  name: "constellation",
-  blurb: "a star chart with curved lineage arcs",
-
-  footprint(t, pos, o) {
-    const label = `  ${o.selected ? treeTitle(t).title : truncate(treeTitle(t).title, o.nameMax)} `;
-    return { x: pos.x, y: pos.y, w: 1 + label.length, h: 1 };
-  },
-
-  edge(canvas, a, b) {
-    // A gentle arc instead of a straight thread: bow the line away from its
-    // own midpoint so sibling lineages fan out instead of overlapping.
-    const mx = (a.x + b.x) / 2;
-    const my = (a.y + b.y) / 2;
-    const dx = b.x - a.x;
-    const dy = b.y - a.y;
-    const len = Math.hypot(dx, dy * 2) || 1;
-    // Control point: the midpoint pushed along the perpendicular (cell aspect
-    // corrected, so the bow looks equally deep whatever the edge's angle).
-    const bow = 0.16;
-    const cx = mx - dy * 2 * bow;
-    const cy = my + dx * 0.5 * bow;
-    const steps = Math.max(8, Math.round(len));
-    let px = a.x;
-    let py = a.y;
-    for (let i = 1; i <= steps; i++) {
-      const s = i / steps;
-      const qx = (1 - s) * (1 - s) * a.x + 2 * (1 - s) * s * cx + s * s * b.x;
-      const qy = (1 - s) * (1 - s) * a.y + 2 * (1 - s) * s * cy + s * s * b.y;
-      // Dash the arc by segment, so a long lineage reads as a thread.
-      if (i % 4 !== 0) canvas.line(px, py, qx, qy, FAINT);
-      px = qx;
-      py = qy;
-    }
-  },
-
-  drawTree(canvas, c) {
-    const sgr = statusSgr(c.t);
-    if (c.selected) halo(canvas, c.pos);
-    canvas.set(
-      c.pos.x,
-      c.pos.y,
-      starGlyph(c.t, c.spinnerFrame),
-      c.selected ? `7;${sgr}` : c.t.seen ? sgr : `1;${sgr}`,
-      c.pickId,
-    );
-    if (c.selected) {
-      label(canvas, c, c.pos.x + 1, c.pos.y, ` ${c.title} `, "1;7");
-    } else if (c.roomy) {
-      label(canvas, c, c.pos.x + 1, c.pos.y, `  ${shownName(c)} `, nameSgr(c));
-    }
-  },
-};
-
-/** Braille ring around the focused star. */
-function halo(canvas: Canvas, pos: Point): void {
-  const rx = 2.2;
-  const ry = 1.1;
-  for (let i = 0; i < 72; i++) {
-    const a = (i / 72) * Math.PI * 2;
-    canvas.dot(
-      Math.round((pos.x + rx * Math.cos(a)) * 2),
-      Math.round((pos.y + ry * Math.sin(a)) * 4),
-      FAINT,
-    );
-  }
-}
-
-/* --------------------------------- cards ---------------------------------- */
-
-function chipText(c: {
-  title: string;
-  selected: boolean;
-  t: TreeSummary;
-  now: number;
-  nameMax: number;
-}): { name: string; age: string } {
-  return {
-    name: c.selected ? c.title : truncate(c.title, Math.min(16, c.nameMax)),
-    age: humanAge(c.t.mtime, c.now),
-  };
-}
-
-const cards: ForestStyle = {
-  id: "cards",
-  name: "cards",
-  blurb: "dense chips: status bar, name, age",
-
-  footprint(t, pos, o) {
-    const { name, age } = chipText({
-      title: treeTitle(t).title,
-      selected: o.selected,
-      t,
-      now: o.now,
-      nameMax: o.nameMax,
-    });
-    // ▌ ◐ name 12m
-    return { x: pos.x, y: pos.y, w: 2 + 2 + name.length + 1 + age.length + 1, h: 1 };
-  },
-
-  drawTree(canvas, c) {
-    const sgr = statusSgr(c.t);
-    const { name, age } = chipText(c);
-    // A chip is only worth drawing whole: near the right edge, shrink the
-    // name, and when even that runs out fall back to the bare status glyph
-    // rather than a half-chip bleeding off the canvas.
-    const chrome = 3 + 1 + age.length + 1; // ▌ glyph space … space age space
-    const nameRoom = c.vp.width - Math.round(c.pos.x) - chrome;
-    const shown = truncate(name, Math.min(name.length, nameRoom));
-    if ((!c.roomy && !c.selected) || nameRoom < 4) {
-      canvas.set(c.pos.x, c.pos.y, statusGlyph(c.t, c.spinnerFrame), sgr, c.pickId);
-      return;
-    }
-    const inv = c.selected ? "7;" : "";
-    let x = c.pos.x;
-    // Status bar on the leading edge: a colored spine the eye can scan down.
-    canvas.set(x++, c.pos.y, "▌", `${inv}${sgr}`, c.pickId);
-    canvas.set(x++, c.pos.y, statusGlyph(c.t, c.spinnerFrame), `${inv}${sgr}`, c.pickId);
-    canvas.set(x++, c.pos.y, " ", c.selected ? "7" : null, c.pickId);
-    canvas.text(x, c.pos.y, shown, c.selected ? "1;7" : c.fallback ? MUTED : c.t.seen ? "0" : "1", c.pickId);
-    x += shown.length;
-    canvas.set(x++, c.pos.y, " ", c.selected ? "7" : null, c.pickId);
-    canvas.text(x, c.pos.y, age, c.selected ? "7" : MUTED, c.pickId);
-    x += age.length;
-    canvas.set(x, c.pos.y, " ", c.selected ? "7" : null, c.pickId);
-  },
-};
-
-/* -------------------------------- contour --------------------------------- */
-
-const contour: ForestStyle = {
-  id: "contour",
-  name: "contour",
-  blurb: "topographic — activity as elevation rings",
-
-  footprint(t, pos, o) {
-    const label = ` ${o.selected ? treeTitle(t).title : truncate(treeTitle(t).title, o.nameMax)} `;
-    return { x: pos.x, y: pos.y, w: 2 + label.length, h: 1 };
-  },
-
-  underlay(canvas, ctx) {
-    // Elevation = activity. A live agent (or work you haven't looked at yet)
-    // raises the ground around it into contours; everything settled is flat
-    // map. Rings stay in the faintest gray there is — contours belong *under*
-    // the labels, never around them.
-    //
-    // Ring size and count follow how much room the forest has: a crowded map
-    // gets one tight ring per live tree instead of two wide ones, so contours
-    // never turn into static.
-    const step = Math.max(0.7, Math.min(1.15, ctx.spacing / 6));
-    const maxRings = ctx.spacing >= 9 ? 2 : 1;
-    for (const { t, pos } of ctx.visible) {
-      const rings = Math.min(maxRings, !t.seen ? 2 : t.live ? 1 : 0);
-      for (let r = rings; r >= 1; r--) {
-        ring(canvas, pos, step * r, r === 1 && !t.seen ? statusSgr(t) : GRID);
-      }
-    }
-  },
-
-  drawTree(canvas, c) {
-    const sgr = statusSgr(c.t);
-    canvas.set(
-      c.pos.x,
-      c.pos.y,
-      statusGlyph(c.t, c.spinnerFrame),
-      c.selected ? `7;${sgr}` : sgr,
-      c.pickId,
-    );
-    if (c.selected) {
-      label(canvas, c, c.pos.x + 1, c.pos.y, ` ${c.title} `, "1;7");
-    } else if (c.roomy) {
-      label(canvas, c, c.pos.x + 1, c.pos.y, ` ${shownName(c)} `, nameSgr(c));
-    }
-  },
-};
-
-/** One contour ring, drawn in the braille layer so labels always win. */
-function ring(canvas: Canvas, pos: Point, r: number, sgr: string): void {
-  const steps = Math.max(28, Math.round(r * 34));
-  for (let i = 0; i < steps; i++) {
-    const a = (i / steps) * Math.PI * 2;
-    canvas.dot(
-      Math.round((pos.x + r * 2 * Math.cos(a)) * 2),
-      Math.round((pos.y + r * Math.sin(a)) * 4),
-      sgr,
-    );
-  }
-}
-
-/* -------------------------------- registry -------------------------------- */
-
-export const FOREST_STYLES: ForestStyle[] = [
-  classic,
-  canopy,
-  constellation,
-  cards,
-  contour,
-];
-
-// The plat is the forest's face: it is what the project is named for.
-export const DEFAULT_STYLE_ID: ForestStyleId = "canopy";
-
-export function forestStyle(id: string | null | undefined): ForestStyle {
-  return FOREST_STYLES.find((s) => s.id === id) ?? FOREST_STYLES[0]!;
-}
-
-/** Next style in the list, wrapping — the `v` key's cycle order. */
-export function nextStyleId(id: string, dir = 1): ForestStyleId {
-  const i = FOREST_STYLES.findIndex((s) => s.id === id);
-  const n = FOREST_STYLES.length;
-  return FOREST_STYLES[(((i < 0 ? 0 : i) + dir) % n + n) % n]!.id;
-}

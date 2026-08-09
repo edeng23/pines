@@ -211,8 +211,11 @@ export class Supervisor extends EventEmitter<SupervisorEvents> {
       if (preferredTreeId) rec.treeId = preferredTreeId;
       this.trees.set(rec.treeId, rec);
     }
+    // Restoring or discovering a tree is bookkeeping, not activity: the
+    // caller's mtime (persisted row, session file stat) survives as-is, so
+    // ages don't reset to 0s on every daemon start.
     Object.assign(rec, partial);
-    this.touch(rec);
+    this.changed(rec);
     return rec;
   }
 
@@ -314,9 +317,13 @@ export class Supervisor extends EventEmitter<SupervisorEvents> {
     return rec;
   }
 
-  /** Force a persist + broadcast for out-of-band field changes (name, leaf, …). */
+  /**
+   * Force a persist + broadcast for out-of-band field changes (name, leaf,
+   * position, …). Deliberately does NOT stamp mtime: renaming or relayouting
+   * a tree is not conversation activity and must not reset its age.
+   */
   notify(rec: TreeRecord): void {
-    this.touch(rec);
+    this.changed(rec);
   }
 
   setStatus(rec: TreeRecord, status: TreeStatus, opts?: { unseen?: boolean }): void {
@@ -357,8 +364,14 @@ export class Supervisor extends EventEmitter<SupervisorEvents> {
     }
   }
 
+  /** Genuine activity (output, status change, user visit): bump the clock. */
   private touch(rec: TreeRecord): void {
     rec.mtime = Date.now();
+    this.emit("update", rec);
+  }
+
+  /** Persist + broadcast without pretending anything just happened. */
+  private changed(rec: TreeRecord): void {
     this.emit("update", rec);
   }
 

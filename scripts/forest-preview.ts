@@ -1,34 +1,31 @@
 #!/usr/bin/env node
 /**
- * Render the forest's looks against a set of fixed scenarios, so the options
- * can be compared without a daemon, a terminal size, or real sessions.
+ * Render the forest against a set of fixed scenarios, so layout and drawing
+ * changes can be reviewed without a daemon, a terminal size, or real sessions.
  *
- *   pnpm tsx scripts/forest-preview.ts --list             # scenarios + looks
- *   pnpm tsx scripts/forest-preview.ts                    # every look, working forest
- *   pnpm tsx scripts/forest-preview.ts --style canopy     # one look, every scenario
- *   pnpm tsx scripts/forest-preview.ts --scenario busy    # one scenario, every look
- *   pnpm tsx scripts/forest-preview.ts --html looks.html  # side-by-side page
- *   pnpm tsx scripts/forest-preview.ts --json panes.json  # panes as HTML fragments
+ *   pnpm tsx scripts/forest-preview.ts --list              # scenarios
+ *   pnpm tsx scripts/forest-preview.ts                     # every scenario
+ *   pnpm tsx scripts/forest-preview.ts --scenario busy     # one scenario
+ *   pnpm tsx scripts/forest-preview.ts --html forest.html  # side-by-side page
+ *   pnpm tsx scripts/forest-preview.ts --json panes.json   # panes as HTML fragments
  *
  * Everything here is deterministic — fixed clock, fixed prompts, positions
- * from the same lexical layout + relax the daemon uses — so two looks differ
- * only in how they draw, and re-running never reshuffles the forest.
+ * from the same lexical layout + relax the daemon uses — so two runs differ
+ * only when the drawing changed, and re-running never reshuffles the forest.
  */
 import { writeFileSync } from "node:fs";
 import { Canvas } from "../src/client/forest/canvas.js";
 import { renderForest } from "../src/client/forest/view.js";
-import { FOREST_STYLES } from "../src/client/forest/styles.js";
 import { fitCamera, worldToCell, type Viewport } from "../src/client/forest/camera.js";
 import { assignLexicalPositions } from "../src/layout/lexical.js";
 import { relax } from "../src/layout/relax.js";
-import { buildLaneGraph, type LaneGraph } from "../src/client/tree/lanegraph.js";
-import type { Camera, NodeSummary, TreeDetail, TreeSummary } from "../src/shared/types.js";
+import type { Camera, TreeSummary } from "../src/shared/types.js";
 
 const NOW = Date.UTC(2026, 0, 2, 12, 0, 0);
 
 /**
  * Session names are the first user message, whitespace-collapsed and clipped
- * at 28 by the daemon — prompts, not slugs. Previews use real-shaped ones.
+ * by the daemon — prompts, not slugs. Previews use real-shaped ones.
  */
 const PROMPTS = [
   "add oauth token refresh",
@@ -145,31 +142,6 @@ function branchedForest(): TreeSummary[] {
   return seeds.map(tree);
 }
 
-/** A branched tree, so the mid-zoom minis have real structure to show. */
-function detailFor(t: TreeSummary): { detail: TreeDetail; graph: LaneGraph } {
-  const nodes: Record<string, NodeSummary> = {};
-  const add = (id: string, parentId: string | null, kind: NodeSummary["kind"], excerpt: string) => {
-    nodes[id] = { id, parentId, kind, excerpt, label: null, timestamp: "", children: [] };
-    if (parentId) nodes[parentId]!.children.push(id);
-  };
-  const depth = Math.min(9, Math.max(4, Math.round(t.nodeCount / 6)));
-  let prev: string | null = null;
-  for (let i = 0; i < depth; i++) {
-    const u = `u${i}`;
-    add(u, prev, "user", `step ${i}`);
-    const a = `a${i}`;
-    add(a, u, "assistant", `reply ${i}`);
-    prev = a;
-    // One abandoned branch partway down, so the mini shows a fork.
-    if (i === Math.floor(depth / 2)) {
-      add(`b${i}`, u, "user", "alternative approach");
-      add(`b${i}a`, `b${i}`, "assistant", "…");
-    }
-  }
-  const detail: TreeDetail = { treeId: t.treeId, rootIds: ["u0"], nodes, leafId: prev };
-  return { detail, graph: buildLaneGraph(detail) };
-}
-
 /* ------------------------------- scenarios -------------------------------- */
 
 export interface Scenario {
@@ -255,7 +227,7 @@ function cameraFor(sc: Scenario): Camera {
   return sc.zoom ? { ...fitCamera(sc.trees, sc.vp), zoom: sc.zoom } : fitCamera(sc.trees, sc.vp);
 }
 
-function frame(styleId: string, sc: Scenario): string[] {
+function frame(sc: Scenario): string[] {
   const canvas = new Canvas(sc.vp.width, sc.vp.height);
   const camera = cameraFor(sc);
   renderForest(canvas, {
@@ -264,9 +236,6 @@ function frame(styleId: string, sc: Scenario): string[] {
     vp: sc.vp,
     selectedId: sc.selectedId,
     spinnerFrame: 1,
-    topo: new Map(sc.trees.map((t) => [t.treeId, detailFor(t)])),
-    style: styleId,
-    now: NOW,
   });
   return canvas.render();
 }
@@ -343,9 +312,8 @@ interface Bounds {
 
 /**
  * The box worth showing: where the trees actually are, plus room for their
- * names. Derived from tree positions rather than from ink, so a look with a
- * full-canvas backdrop (blueprint's graph paper) crops exactly like one
- * without, and every pane of a scenario shows the same window.
+ * names. Derived from tree positions rather than from ink, so the graph-paper
+ * backdrop never inflates the crop and every pane shows the same window.
  */
 function treeBounds(sc: Scenario): Bounds {
   const camera = cameraFor(sc);
@@ -403,30 +371,25 @@ function cellsToHtml(grid: Cell[][], b: Bounds): string {
   return out.join("\n");
 }
 
-/** Render one scenario in every look, cropped to their shared content box. */
-function scenarioPanes(sc: Scenario): Map<string, string> {
-  const bounds = treeBounds(sc);
-  const panes = new Map<string, string>();
-  for (const s of FOREST_STYLES) panes.set(s.id, cellsToHtml(toCells(frame(s.id, sc)), bounds));
-  return panes;
+/** Render one scenario, cropped to its content box. */
+function scenarioPane(sc: Scenario): string {
+  return cellsToHtml(toCells(frame(sc)), treeBounds(sc));
 }
 
-/** Every pane, keyed `style/scenario`, for embedding in a page of your own. */
+/** Every pane, keyed by scenario, for embedding in a page of your own. */
 function panesJson(): string {
   const panes: Record<string, string> = {};
   const dims: Record<string, { cols: number; rows: number }> = {};
   for (const sc of SCENARIOS) {
-    const rendered = scenarioPanes(sc);
-    for (const [styleId, html] of rendered) panes[`${styleId}/${sc.id}`] = html;
-    const first = rendered.values().next().value as string;
+    const pane = scenarioPane(sc);
+    panes[sc.id] = pane;
     dims[sc.id] = {
-      cols: Math.max(...first.split("\n").map((l) => l.replace(/<[^>]*>/g, "").length)),
-      rows: first.split("\n").length,
+      cols: Math.max(...pane.split("\n").map((l) => l.replace(/<[^>]*>/g, "").length)),
+      rows: pane.split("\n").length,
     };
   }
   return JSON.stringify(
     {
-      styles: FOREST_STYLES.map((s) => ({ id: s.id, name: s.name, blurb: s.blurb })),
       scenarios: SCENARIOS.map((sc) => ({
         id: sc.id,
         label: sc.label,
@@ -444,24 +407,20 @@ function panesJson(): string {
 }
 
 function html(): string {
-  const blocks = SCENARIOS.map((sc) => {
-    const rendered = scenarioPanes(sc);
-    const figures = FOREST_STYLES.map(
-      (s) => `<figure><figcaption>${s.name}</figcaption><pre>${rendered.get(s.id)}</pre></figure>`,
-    ).join("\n");
-    return `<section><h2>${sc.label}</h2><p>${sc.blurb}</p>${figures}</section>`;
-  }).join("\n");
-  return `<!doctype html><meta charset="utf-8"><title>pines · forest looks</title>
+  const blocks = SCENARIOS.map(
+    (sc) =>
+      `<section><h2>${sc.label}</h2><p>${sc.blurb}</p><figure><pre>${scenarioPane(sc)}</pre></figure></section>`,
+  ).join("\n");
+  return `<!doctype html><meta charset="utf-8"><title>pines · forest</title>
 <style>
  body{background:${BG};color:${FG};font:14px/1.5 ui-sans-serif,system-ui,sans-serif;margin:0;padding:32px}
  h1{font-size:20px;font-weight:600}
  h2{font-size:16px;margin:36px 0 2px;text-transform:lowercase}
  p{color:#8b949e;margin:0 0 12px}
  pre{font:12px/1.15 ui-monospace,SFMono-Regular,Menlo,monospace;background:${BG};border:1px solid #21262d;border-radius:8px;padding:12px;overflow-x:auto}
- figcaption{color:#6e7681;font-size:11px;margin:12px 0 4px}
  figure{margin:0}
 </style>
-<h1>pines · forest looks</h1>
+<h1>pines · forest</h1>
 ${blocks}`;
 }
 
@@ -474,7 +433,6 @@ const flag = (name: string): string | undefined => {
 };
 const htmlOut = flag("html");
 const jsonOut = flag("json");
-const onlyStyle = flag("style");
 const onlyScenario = flag("scenario");
 
 if (argv.includes("--list")) {
@@ -486,8 +444,6 @@ if (argv.includes("--list")) {
         .padStart(2)} trees  ${sc.blurb}\n`,
     );
   }
-  process.stdout.write("\nlooks:\n");
-  for (const s of FOREST_STYLES) process.stdout.write(`  ${s.id.padEnd(14)} ${s.blurb}\n`);
 } else if (jsonOut) {
   writeFileSync(jsonOut, panesJson());
   process.stdout.write(`wrote ${jsonOut}\n`);
@@ -495,18 +451,11 @@ if (argv.includes("--list")) {
   writeFileSync(htmlOut, html());
   process.stdout.write(`wrote ${htmlOut}\n`);
 } else {
-  // Terminal: the working day for every look, every scenario for one look,
-  // or exactly the cell you asked for.
   const scenarios = onlyScenario
     ? SCENARIOS.filter((sc) => sc.id === onlyScenario)
-    : onlyStyle
-      ? SCENARIOS
-      : SCENARIOS.slice(0, 1);
-  const styles = onlyStyle ? FOREST_STYLES.filter((s) => s.id === onlyStyle) : FOREST_STYLES;
+    : SCENARIOS;
   for (const sc of scenarios) {
-    for (const s of styles) {
-      process.stdout.write(`\n\x1b[1m${s.name}\x1b[0m \x1b[2m· ${sc.label} — ${sc.blurb}\x1b[0m\n`);
-      process.stdout.write(frame(s.id, sc).join("\n") + "\n");
-    }
+    process.stdout.write(`\n\x1b[1m${sc.label}\x1b[0m \x1b[2m— ${sc.blurb}\x1b[0m\n`);
+    process.stdout.write(frame(sc).join("\n") + "\n");
   }
 }

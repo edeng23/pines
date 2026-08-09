@@ -36,7 +36,6 @@ import {
   type Viewport,
 } from "./forest/camera.js";
 import { renderForest, statusGlyph, statusSgr, SPINNER_FRAMES } from "./forest/view.js";
-import { FOREST_STYLES, forestStyle, nextStyleId } from "./forest/styles.js";
 import {
   humanAge,
   renderSidebar,
@@ -431,8 +430,6 @@ export async function runApp(): Promise<void> {
         vp: cvp,
         selectedId,
         spinnerFrame,
-        style: forestStyle(ui.forestStyle),
-        now: Date.now(),
       });
       lastCanvas = canvas; // retained for mouse hit-testing
       body = canvas.render();
@@ -460,12 +457,12 @@ export async function runApp(): Promise<void> {
       }
       // Ordered by importance — narrow terminals truncate from the right.
       hints =
-        "→ open · ↵ attach · / search · s similar · n new · v style · ± zoom · S sidebar · q quit ";
+        "→ open · ↵ attach · / search · s similar · n new · r rename · ± zoom · S sidebar · q quit ";
     } else {
       body = renderTreeBody(view);
       // The selected row explains what ⏎ does there; keep the bar terse and
       // front-load what narrow terminals would otherwise cut off.
-      hints = "⏎ attach/branch · ← forest · b branch · / search · L label · 1-9 branch · ↑↓ move ";
+      hints = "⏎ attach/branch · ← forest · b branch · / search · L label · r rename · 1-9 branch · ↑↓ move ";
     }
     if (overlay) {
       composeOverlay(body, view);
@@ -848,36 +845,6 @@ export async function runApp(): Promise<void> {
     overlay.timer = setTimeout(runSearch, 150);
   }
 
-  /** Switch the forest's look, persist it, and say which one this is. */
-  function setForestStyle(id: (typeof FOREST_STYLES)[number]["id"]): void {
-    ui.forestStyle = id;
-    saveUiState(ui);
-    const style = forestStyle(id);
-    showToast(`${style.name} — ${style.blurb}`);
-    // Styles paint different amounts of the canvas; clear so the last look
-    // leaves nothing of itself behind.
-    out.write("\x1b[2J");
-    requestRender();
-  }
-
-  function openStylePicker(): void {
-    const current = FOREST_STYLES.findIndex((s) => s.id === ui.forestStyle);
-    overlay = {
-      kind: "menu",
-      title: "forest look",
-      options: FOREST_STYLES.map(
-        (s, i) => `${i + 1}  ${s.id === ui.forestStyle ? "▸" : " "} ${s.name.padEnd(14)}${s.blurb}`,
-      ),
-      selected: current < 0 ? 0 : current,
-      onPick: (index) => {
-        const style = FOREST_STYLES[index];
-        if (style) setForestStyle(style.id);
-        else requestRender();
-      },
-    };
-    requestRender();
-  }
-
   function openHelp(): void {
     const prefixName = PREFIX_KEY;
     overlay = {
@@ -888,12 +855,12 @@ export async function runApp(): Promise<void> {
         "sidebar  S=toggle  [/]=width  drag divider=resize  ↵/dbl-click=attach",
         "forest   wheel/±=zoom  drag/hjkl=pan  click/tab=select  ↵=attach",
         "forest   a=attach  n=new tree + attach  x=kill agent  R=relayout",
-        "forest   o=jump to attention  0=fit all  L=rename tree",
+        "forest   o=jump to attention  0=fit all  r/L=rename tree",
         "forest   A/ctrl+x=archive/unarchive tree  .=show/hide archived",
-        "forest   v=next look  V=pick a look (canopy/classic/stars/cards/…)",
         "forest   s=similar conversations (semantic neighbors of the selection)",
         "tree     j/k=move  ↵/→ = attach at a ● tip (an agent lives there), or grow",
         "tree     a new branch+agent from any other message  1-9=go to branch  b  L",
+        "tree     r=rename this tree (its forest name)",
         `pi view  ${prefixName} ←/d=tree  ${prefixName} f=forest  ${prefixName} n=next attention`,
         `pi view  ${prefixName} ${prefixName}=send ${prefixName} to pi itself`,
         "search   / from forest or tree · ↑/↓ select · ↵ jump",
@@ -985,14 +952,16 @@ export async function runApp(): Promise<void> {
     requestRender();
   }
 
-  /** Forest-level naming: L renames the selected tree (its forest label). */
+  /**
+   * Name the tree (its forest label): `r` anywhere, `L` in the forest.
+   * In the tree view the conversation is the target — no selection needed.
+   */
   function renameTreeFlow(): void {
-    if (mode.kind !== "forest") return;
-    if (!selectedId) {
+    const treeId = mode.kind === "tree" ? mode.rootId : mode.kind === "forest" ? selectedId : null;
+    if (!treeId) {
       showToast("select a tree first (↑/↓ or click)");
       return;
     }
-    const treeId = selectedId;
     const current = forest.get(treeId)?.name ?? "";
     overlay = {
       kind: "input",
@@ -1430,12 +1399,6 @@ export async function runApp(): Promise<void> {
         out.write("\x1b[2J");
         requestRender();
         return;
-      case "v":
-        setForestStyle(nextStyleId(ui.forestStyle));
-        return;
-      case "V":
-        openStylePicker();
-        return;
       case "[":
       case "]": {
         if (sidebarW() === 0) return;
@@ -1485,6 +1448,7 @@ export async function runApp(): Promise<void> {
       case "?":
         openHelp();
         return;
+      case "r":
       case "L":
         void renameTreeFlow();
         return;
@@ -1642,6 +1606,9 @@ export async function runApp(): Promise<void> {
         return;
       case "L":
         void labelFlow();
+        return;
+      case "r":
+        void renameTreeFlow();
         return;
       case "S":
         ui.sidebarVisible = !ui.sidebarVisible;

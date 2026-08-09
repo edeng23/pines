@@ -5,7 +5,7 @@
 import { afterAll, describe, expect, it } from "vitest";
 import { spawn, type ChildProcess } from "node:child_process";
 import { connect } from "node:net";
-import { mkdirSync, mkdtempSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, unlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -84,7 +84,12 @@ describe("restart restore", () => {
     const sessionsRoot = join(home, "pi-sessions");
     const dir = join(sessionsRoot, "--tmp-proj--");
     mkdirSync(dir, { recursive: true });
-    writeFileSync(join(dir, "2026-01-01T00-00-00-000Z_55555555.jsonl"), branchedSession("/tmp/proj").content);
+    const sessionFile = join(dir, "2026-01-01T00-00-00-000Z_55555555.jsonl");
+    writeFileSync(sessionFile, branchedSession("/tmp/proj").content);
+    // An hour-old session: its age must read as an hour, not zero, both on
+    // first discovery and after the crash — daemon starts are not activity.
+    const fileMtime = Date.now() - 60 * 60_000;
+    utimesSync(sessionFile, fileMtime / 1000, fileMtime / 1000);
     const sockPath = join(home, "pines.sock");
     const env = { PINES_HOME: home, PINES_PI_SESSIONS: sessionsRoot };
 
@@ -103,6 +108,8 @@ describe("restart restore", () => {
     }
 
     expect(before.nodeCount).toBeGreaterThan(0);
+    // Age comes from the session file, not from when the daemon noticed it.
+    expect(Math.abs((before.mtime as number) - fileMtime)).toBeLessThan(5_000);
     const savedX = before.x as number;
     const savedY = before.y as number;
     expect(savedX !== 0 || savedY !== 0).toBe(true);
@@ -144,6 +151,8 @@ describe("restart restore", () => {
     expect(restored!.status).toBe("dormant");
     expect(restored!.live).toBe(false);
     expect(restored!.nodeCount).toBe(before.nodeCount);
+    // The counters don't reset: an hour-old tree is still an hour old.
+    expect(Math.abs((restored!.mtime as number) - fileMtime)).toBeLessThan(5_000);
     expect(restored!.x).toBe(savedX);
     expect(restored!.y).toBe(savedY);
     expect(restored!.archived).toBe(true);

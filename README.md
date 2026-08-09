@@ -26,7 +26,7 @@ database and sessions. Your real `~/.pines` and `~/.pi` are never touched, and
 no model is ever called.
 </details>
 
-Keybindings, looks, branching, architecture → **[docs/GUIDE.md](docs/GUIDE.md)**
+Keybindings, branching, architecture → **[docs/GUIDE.md](docs/GUIDE.md)**
 
 <p align="center">
   <img src="docs/king-talks-to-tree.jpg" width="440"

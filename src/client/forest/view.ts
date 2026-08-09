@@ -16,8 +16,8 @@ import { Canvas } from "./canvas.js";
 import { worldToCell, type Viewport } from "./camera.js";
 import { treeTitle } from "./sidebar.js";
 import { FAINT, MUTED } from "../theme.js";
-import { forestStyle } from "./styles.js";
-import { LabelPlacer, type DrawCtx, type ForestStyle, type PlacedTree } from "./style.js";
+import { canopy } from "./styles.js";
+import { LabelPlacer, type DrawCtx, type PlacedTree } from "./style.js";
 
 export { SPINNER_FRAMES, statusGlyph, statusSgr } from "./status.js";
 
@@ -30,19 +30,11 @@ export interface ForestRenderInput {
   vp: Viewport;
   selectedId: string | null;
   spinnerFrame: number;
-  /** Visual option; defaults to classic. */
-  style?: ForestStyle | string;
-  /** Wall clock for age labels (injected so rendering stays deterministic). */
-  now?: number;
 }
 
 export function renderForest(canvas: Canvas, input: ForestRenderInput): Map<number, string> {
   const { trees, camera, vp, selectedId, spinnerFrame } = input;
-  const style =
-    typeof input.style === "object" && input.style !== null
-      ? input.style
-      : forestStyle(input.style);
-  const now = input.now ?? Date.now();
+  const style = canopy;
   const pickMap = new Map<number, string>();
   canvas.clear();
 
@@ -86,7 +78,7 @@ export function renderForest(canvas: Canvas, input: ForestRenderInput): Map<numb
 
   // Backdrop (grids, contour rings), then lineage edges: both live under
   // every marker.
-  style.underlay?.(canvas, { vp, visible, now, spacing: medianSpacing(visible) });
+  style.underlay?.(canvas, { vp, visible, spacing: medianSpacing(visible) });
 
   const byPath = new Map<string, TreeSummary>();
   for (const t of trees) byPath.set(t.sessionPath, t);
@@ -107,7 +99,7 @@ export function renderForest(canvas: Canvas, input: ForestRenderInput): Map<numb
   const nameMax = spacing < 10 ? 11 : 18;
   const ctxFor = (e: PlacedTree, roomy: boolean, speaks = true): DrawCtx => {
     const { title, fallback } = treeTitle(e.t);
-    return { ...e, spinnerFrame, now, title, fallback, vp, roomy, speaks, nameMax, spacing, labels };
+    return { ...e, spinnerFrame, title, fallback, vp, roomy, speaks, nameMax, spacing, labels };
   };
 
   // One drawing path at every zoom: the sprite IS the tree — maturity by
@@ -126,7 +118,7 @@ export function renderForest(canvas: Canvas, input: ForestRenderInput): Map<numb
   const sel = visible.find((e) => e.selected);
   if (sel) {
     labels.reserveRect(
-      style.footprint(sel.t, sel.pos, { selected: true, now, nameMax, spacing }),
+      style.footprint(sel.t, sel.pos, { selected: true, nameMax, spacing }),
       sel.t.treeId,
     );
   }
@@ -134,7 +126,7 @@ export function renderForest(canvas: Canvas, input: ForestRenderInput): Map<numb
   for (const e of visible) {
     if (e.selected) continue;
     const speaks = budget.has(e.t.treeId);
-    const rect = style.footprint(e.t, e.pos, { selected: false, now, nameMax, spacing });
+    const rect = style.footprint(e.t, e.pos, { selected: false, nameMax, spacing });
     const roomy = speaks && labels.claimRect(rect, e.t.treeId);
     style.drawTree(canvas, ctxFor(e, roomy, speaks));
   }
