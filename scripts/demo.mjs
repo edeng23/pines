@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Open pines on a throwaway forest, so the looks can be tried on something
+ * Open pines on a throwaway forest, so it can be tried on something
  * that resembles a real week of work — without touching real sessions and
  * without spending a token.
  *
@@ -47,7 +47,7 @@ if (!existsSync(cli)) {
 const demoEnv = { ...process.env, PINES_HOME: HOME, PINES_PI_SESSIONS: SESSIONS };
 
 // The sandbox is throwaway BY DESIGN — so when the generated content itself
-// evolves (new looks, the branched conversation, …), an old sandbox must not
+// evolves (the branched conversation, new session shapes, …), an old sandbox must not
 // quietly hide it. Bump DEMO_VERSION whenever the generator's output changes
 // and stale sandboxes rebuild themselves on the next `pnpm demo`.
 const DEMO_VERSION = "2"; // 2: branched fork family (one-tree merge showcase)
@@ -112,7 +112,7 @@ if (existing === 0) {
 }
 
 process.stdout.write(
-  `\x1b[2mdemo forest in ${HOME} — v cycles the look, V picks one, ? for keys, q quits\x1b[0m\n`,
+  `\x1b[2mdemo forest in ${HOME} — r renames a tree, ? for keys, q quits\x1b[0m\n`,
 );
 
 // Hand the terminal over to pines, pointed entirely at the sandbox.

@@ -55,7 +55,9 @@ import type { ParsedSession } from "../session/parser.js";
 function deriveTreeName(parsed: ParsedSession): string | null {
   const clip = (s: string) => {
     const t = s.replace(/\s+/g, " ").trim();
-    return t.length > 28 ? t.slice(0, 27) + "…" : t;
+    // Generous: displays truncate to fit themselves, but a name clipped here
+    // is clipped everywhere — a wide sidebar can show the longer read.
+    return t.length > 48 ? t.slice(0, 47) + "…" : t;
   };
   // Branched sessions share their parent's opening message — the divergence
   // point (their leaf-most text) is what distinguishes them.
@@ -246,7 +248,7 @@ export class Daemon {
   private async ingest(sessionPath: string, preferredTreeId?: string): Promise<TreeRecord | undefined> {
     if (!existsSync(sessionPath)) return undefined;
     try {
-      const { treeId, parsed } = await ingestSessionFile(this.db, sessionPath, {
+      const { treeId, parsed, mtimeMs } = await ingestSessionFile(this.db, sessionPath, {
         preferredTreeId,
       });
       let rec = [...this.supervisor.trees.values()].find((t) => t.sessionPath === sessionPath);
@@ -257,6 +259,11 @@ export class Daemon {
         rec = this.supervisor.upsertDormant({ sessionPath }, treeId);
       }
       rec.sessionId = parsed.header.sessionId;
+      // The file's own mtime is the honest activity clock. Wall-clock "now"
+      // here would reset every age to 0s on daemon start, when the watcher's
+      // initial sweep re-ingests every session — and persist() would then
+      // write that lie back to SQLite.
+      rec.mtime = mtimeMs;
       rec.cwd = parsed.header.cwd ?? rec.cwd;
       rec.parentSessionPath = parsed.header.parentSession;
       rec.nodeCount = parsed.entries.length;

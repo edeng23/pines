@@ -75,27 +75,17 @@ share one selection: moving in the list pans the camera only when the tree is
 off-screen. `S` toggles the sidebar, `[`/`]` resize it, or drag the divider;
 width and visibility persist in `~/.pines/ui.json`.
 
-The canvas has five **looks** — same layout and same status colors, different
-ways of reading the map. `v` cycles them, `V` opens the picker, and the choice
-persists in `~/.pines/ui.json`:
+The canvas draws the **canopy** — a forester's plat: sunlit pines on graph
+paper, lineage surveyed in right angles. A tree grows with the conversation
+behind it — four sizes from sapling to old growth — lit from the upper left,
+in one of a few near-greens picked from its id so a hillside never looks
+tiled. A dormant session keeps its needles in a muted, wintered-over green
+(the whole forest sleeps between daemon runs — it still reads as a forest);
+only a crashed one stands bare, ember red. Work you haven't seen lights the
+crown's tip. Underneath, graph paper and right-angle lineage: survey lines
+run tree to tree and disappear behind the wood.
 
-| look | what it's going for |
-|---|---|
-| `canopy` | *(default)* a forester's plat — sunlit pines on graph paper, lineage surveyed in right angles |
-| `classic` | status dot + name, braille lineage threads |
-| `constellation` | a star chart: brightness by size, curved lineage arcs |
-| `cards` | one dense chip per tree — status bar, name, age |
-| `contour` | a topographic map: live and unseen work rises into elevation rings |
-
-In `canopy` a tree grows with the conversation behind it — four sizes from
-sapling to old growth — lit from the upper left, in one of a few near-greens
-picked from its id so a hillside never looks tiled. A session with no process
-behind it loses its needles and stands as winter wood; a crashed one stands
-ember red; work you haven't seen lights the crown's tip. Underneath, the
-graph paper and the right-angle lineage of the old `blueprint` look: survey
-lines run tree to tree and disappear behind the wood.
-
-**Try them without touching your sessions:**
+**Try it without touching your sessions:**
 
 ```sh
 pnpm build && pnpm demo      # a throwaway forest under ~/.pines-demo
@@ -107,19 +97,18 @@ a branch, and a parked fork — open it with `→` to see the one-tree merge,
 agent tips, and the metro map) — and starts three
 simulated agents (the test suite's fake pi — no model is ever called), then
 opens the forest on that sandbox: its own daemon, socket, database and sessions
-directory. Cycle looks with `v`, pick one with `V`, `x` kills an agent, `n`
-starts another. `pnpm demo --trees 60` for a crowded forest, `--reset` to start
-over, and `rm -rf ~/.pines-demo` to erase the whole thing.
+directory. `x` kills an agent, `n` starts another. `pnpm demo --trees 60` for
+a crowded forest, `--reset` to start over, and `rm -rf ~/.pines-demo` to erase
+the whole thing.
 
-In a crowded forest every look names the live, unseen, and crashed sessions
+In a crowded forest the map names the live, unseen, and crashed sessions
 first and leaves the rest as glyphs — names shorten as trees pack together, and
-zooming in hands them back. Compare the looks without running anything:
+zooming in hands them back. Preview the map without running anything:
 
 ```sh
-pnpm tsx scripts/forest-preview.ts --list             # scenarios and looks
-pnpm tsx scripts/forest-preview.ts --scenario busy    # one scenario, every look
-pnpm tsx scripts/forest-preview.ts --style canopy     # one look, every scenario
-pnpm tsx scripts/forest-preview.ts --html looks.html  # side by side in a browser
+pnpm tsx scripts/forest-preview.ts --list              # scenarios
+pnpm tsx scripts/forest-preview.ts --scenario busy     # one scenario
+pnpm tsx scripts/forest-preview.ts --html forest.html  # side by side in a browser
 ```
 
 The scenarios cover a working day, a quiet forest, forty sessions at once, a
@@ -128,8 +117,8 @@ and a first run — all placed by the same layout the daemon uses.
 
 | view | keys / mouse |
 |---|---|
-| forest | `↑`/`↓` move through the sidebar list · `Enter` attach · `→` open tree view · wheel = zoom at cursor · drag = pan · click = select · double-click = open (canvas) / attach (sidebar) · `hjkl` pan · `+`/`-` zoom · `0` fit · `Tab` cycle by attention · `o` jump to most urgent · `a` attach · `n` new tree and attach · `L` rename tree · `A`/`Ctrl+X` archive/unarchive · `.` show/hide archived · `S` sidebar · `[`/`]` sidebar width · `v`/`V` look · `x` kill agent · `R` relayout · `s` similar conversations · `/` search · `?` help |
-| tree | `↑`/`↓` or `j`/`k` move · `→`/`Enter` — on a tip (a node showing an agent's status): attach to that branch's agent (resume if dormant); on a `⋯` row: expand; on a `[+]` row: unfold; on any other message: grow a new branch there with its own agent and attach · `1`-`9` jump to a branch tip · `←`/`Esc` back to the forest · `b` branch menu (with/without agent) · `L` label · `/` search |
+| forest | `↑`/`↓` move through the sidebar list · `Enter` attach · `→` open tree view · wheel = zoom at cursor · drag = pan · click = select · double-click = open (canvas) / attach (sidebar) · `hjkl` pan · `+`/`-` zoom · `0` fit · `Tab` cycle by attention · `o` jump to most urgent · `a` attach · `n` new tree and attach · `r`/`L` rename tree · `A`/`Ctrl+X` archive/unarchive · `.` show/hide archived · `S` sidebar · `[`/`]` sidebar width · `x` kill agent · `R` relayout · `s` similar conversations · `/` search · `?` help |
+| tree | `↑`/`↓` or `j`/`k` move · `→`/`Enter` — on a tip (a node showing an agent's status): attach to that branch's agent (resume if dormant); on a `⋯` row: expand; on a `[+]` row: unfold; on any other message: grow a new branch there with its own agent and attach · `1`-`9` jump to a branch tip · `←`/`Esc` back to the forest · `b` branch menu (with/without agent) · `L` label · `r` rename tree · `/` search |
 | attached pi | everything goes to pi, except the prefix `Ctrl+t`: `←`/`d` = back to tree · `f` = forest · `n` = next attention target · `Ctrl+t Ctrl+t` = send a literal Ctrl+t |
 
 Zooming is semantic: the sprite is the tree at every distance — maturity by

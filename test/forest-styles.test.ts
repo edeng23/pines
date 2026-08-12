@@ -4,11 +4,9 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { Canvas } from "../src/client/forest/canvas.js";
 import { renderForest } from "../src/client/forest/view.js";
-import { DEFAULT_STYLE_ID, FOREST_STYLES, forestStyle, nextStyleId } from "../src/client/forest/styles.js";
 import { LabelPlacer } from "../src/client/forest/style.js";
-import { buildLaneGraph } from "../src/client/tree/lanegraph.js";
 import { loadUiState } from "../src/client/uistate.js";
-import type { NodeSummary, TreeDetail, TreeSummary } from "../src/shared/types.js";
+import type { TreeSummary } from "../src/shared/types.js";
 
 const NOW = 1_700_000_000_000;
 
@@ -41,7 +39,7 @@ const FOREST: TreeSummary[] = [
   tree({ treeId: "sleeping", status: "dormant", x: 0, y: 8, nodeCount: 3 }),
 ];
 
-function render(styleId: string, zoom: number, trees = FOREST, selectedId = "unseen") {
+function render(zoom: number, trees = FOREST, selectedId = "unseen") {
   const vp = { width: 80, height: 24 };
   const canvas = new Canvas(vp.width, vp.height);
   const pick = renderForest(canvas, {
@@ -50,95 +48,81 @@ function render(styleId: string, zoom: number, trees = FOREST, selectedId = "uns
     vp,
     selectedId,
     spinnerFrame: 0,
-    style: styleId,
-    now: NOW,
   });
   const plain = canvas.render().map((r) => r.replace(/\x1b\[[0-9;]*m/g, ""));
   return { canvas, pick, plain, text: plain.join("\n") };
 }
 
-describe("forest styles", () => {
-  it("offers five looks with unique ids and cycles through them", () => {
-    expect(FOREST_STYLES).toHaveLength(5);
-    expect(new Set(FOREST_STYLES.map((s) => s.id)).size).toBe(5);
-    let id = FOREST_STYLES[0]!.id;
-    const seen = new Set<string>();
-    for (let i = 0; i < FOREST_STYLES.length; i++) {
-      seen.add(id);
-      id = nextStyleId(id);
+describe("canopy", () => {
+  it("draws every tree's marker and keeps it clickable", () => {
+    const { canvas, pick } = render(2);
+    const hits = new Set<string>();
+    for (let y = 0; y < 24; y++) {
+      for (let x = 0; x < 80; x++) {
+        const id = canvas.pickAt(x, y);
+        if (id >= 0) hits.add(pick.get(id)!);
+      }
     }
-    expect(seen.size).toBe(FOREST_STYLES.length);
-    expect(id).toBe(FOREST_STYLES[0]!.id); // wraps back around
-    expect(nextStyleId(FOREST_STYLES[0]!.id, -1)).toBe(FOREST_STYLES.at(-1)!.id);
+    for (const t of FOREST) expect(hits).toContain(t.treeId);
   });
 
-  it("falls back to classic for an unknown style id", () => {
-    expect(forestStyle("nonsense").id).toBe("classic");
-    expect(forestStyle(null).id).toBe("classic");
+  it("always spells out the selected tree's name", () => {
+    expect(render(2).text).toContain("unseen");
+    // Even when a neighbor sits right on top of it.
+    const crowded = [
+      tree({ treeId: "unseen", status: "waiting", seen: false, live: true, x: 0, y: 0 }),
+      tree({ treeId: "neighborly", status: "running", live: true, x: 0.4, y: 0.1 }),
+    ];
+    expect(render(2, crowded).text).toContain("unseen");
   });
 
-  for (const style of FOREST_STYLES) {
-    describe(style.id, () => {
-      it("draws every tree's marker and keeps it clickable", () => {
-        const { canvas, pick } = render(style.id, 2);
-        const hits = new Set<string>();
-        for (let y = 0; y < 24; y++) {
-          for (let x = 0; x < 80; x++) {
-            const id = canvas.pickAt(x, y);
-            if (id >= 0) hits.add(pick.get(id)!);
-          }
-        }
-        for (const t of FOREST) expect(hits).toContain(t.treeId);
-      });
+  it("keeps drawing the tree marker and name at mid zoom (no lane minis)", () => {
+    // The sprite is the representation at every zoom — mid zoom must
+    // show the same marker language, never dangling topology dots.
+    const solo = [tree({ treeId: "unseen", status: "waiting", seen: false, live: true })];
+    const { text } = render(6, solo);
+    expect(text).toContain("unseen");
+  });
 
-      it("always spells out the selected tree's name", () => {
-        expect(render(style.id, 2).text).toContain("unseen");
-        // Even when a neighbor sits right on top of it.
-        const crowded = [
-          tree({ treeId: "unseen", status: "waiting", seen: false, live: true, x: 0, y: 0 }),
-          tree({ treeId: "neighborly", status: "running", live: true, x: 0.4, y: 0.1 }),
-        ];
-        expect(render(style.id, 2, crowded).text).toContain("unseen");
-      });
+  it("keeps a dormant tree's needles and strips only a crashed one bare", () => {
+    // A whole forest goes dormant on every daemon restart: it must still
+    // read as a forest of pines, not a burn site of winter wood.
+    const sleeping = [tree({ treeId: "sleeper", status: "dormant", nodeCount: 40 })];
+    expect(render(6, sleeping, null).text).toMatch(/[▲▟█▙]/);
+    const burned = [tree({ treeId: "burned", status: "crashed", nodeCount: 40 })];
+    const burnedText = render(6, burned, null).text;
+    expect(burnedText).toMatch(/[╲╱]/);
+    expect(burnedText).not.toMatch(/[▟█▙]/);
+  });
 
-      it("keeps drawing the tree marker and name at mid zoom (no lane minis)", () => {
-        // The sprite is the representation at every zoom — mid zoom must
-        // show the same marker language, never dangling topology dots.
-        const solo = [tree({ treeId: "unseen", status: "waiting", seen: false, live: true })];
-        const { text } = render(style.id, 6, solo);
-        expect(text).toContain("unseen");
-      });
+  it("survives lineage edges that share a row or a column", () => {
+    // Right-angle edges once looped forever on a zero-length run.
+    const aligned = [
+      tree({ treeId: "p", x: -4, y: 0 }),
+      tree({ treeId: "same-row", x: 4, y: 0, parentSessionPath: "/s/p" }),
+      tree({ treeId: "same-col", x: -4, y: 5, parentSessionPath: "/s/p" }),
+      tree({ treeId: "same-cell", x: -4, y: 0, parentSessionPath: "/s/p" }),
+    ];
+    expect(() => render(2, aligned, "p")).not.toThrow();
+  });
 
-      it("survives lineage edges that share a row or a column", () => {
-        // Right-angle edges once looped forever on a zero-length run.
-        const aligned = [
-          tree({ treeId: "p", x: -4, y: 0 }),
-          tree({ treeId: "same-row", x: 4, y: 0, parentSessionPath: "/s/p" }),
-          tree({ treeId: "same-col", x: -4, y: 5, parentSessionPath: "/s/p" }),
-          tree({ treeId: "same-cell", x: -4, y: 0, parentSessionPath: "/s/p" }),
-        ];
-        expect(() => render(style.id, 2, aligned, "p")).not.toThrow();
-      });
-
-      it("never lets a long label swallow a neighbor's marker", () => {
-        // The selected tree has a name far longer than the gap to its
-        // neighbor: the neighbor must still own cells of its own.
-        const pair = [
-          tree({ treeId: "a-very-long-tree-name-indeed", status: "running", live: true, x: -1, y: 0 }),
-          tree({ treeId: "neighbor", status: "waiting", seen: false, x: 1, y: 0 }),
-        ];
-        const { canvas, pick } = render(style.id, 3, pair, "a-very-long-tree-name-indeed");
-        const owners = new Set<string>();
-        for (let y = 0; y < 24; y++) {
-          for (let x = 0; x < 80; x++) {
-            const id = canvas.pickAt(x, y);
-            if (id >= 0) owners.add(pick.get(id)!);
-          }
-        }
-        expect(owners).toContain("neighbor");
-      });
-    });
-  }
+  it("never lets a long label swallow a neighbor's marker", () => {
+    // The selected tree has a name far longer than the gap to its
+    // neighbor: the neighbor must still own cells of its own.
+    const pair = [
+      tree({ treeId: "a-very-long-tree-name-indeed", status: "running", live: true, x: -1, y: 0 }),
+      tree({ treeId: "neighbor", status: "waiting", seen: false, x: 1, y: 0 }),
+    ];
+    const { canvas, pick } = render(3, pair, "a-very-long-tree-name-indeed");
+    const owners = new Set<string>();
+    for (let y = 0; y < 24; y++) {
+      for (let x = 0; x < 80; x++) {
+        const id = canvas.pickAt(x, y);
+        if (id >= 0) owners.add(pick.get(id)!);
+      }
+    }
+    expect(owners).toContain("neighbor");
+  });
 });
 
 describe("crowding", () => {
@@ -156,31 +140,29 @@ describe("crowding", () => {
     }),
   );
 
-  for (const style of FOREST_STYLES) {
-    it(`${style.id} keeps a packed forest legible and still names the unseen tree`, () => {
-      const { text, plain } = render(style.id, 2, packed, null);
-      // The one tree waiting on the user is named even in the crush.
-      expect(text).toContain("a sessio");
-      // …but the map does not become a wall of text: far fewer names than
-      // trees, and no row is packed edge to edge with them.
-      const names = (text.match(/a session about thing/g) ?? []).length;
-      expect(names).toBeLessThan(packed.length);
-      // Letters only: a backdrop of grid dots is not clutter, names are.
-      const busiest = Math.max(...plain.map((r) => (r.match(/[a-z]/g) ?? []).length));
-      expect(busiest).toBeLessThan(48);
-    });
+  it("keeps a packed forest legible and still names the unseen tree", () => {
+    const { text, plain } = render(2, packed, null);
+    // The one tree waiting on the user is named even in the crush.
+    expect(text).toContain("a sessio");
+    // …but the map does not become a wall of text: far fewer names than
+    // trees, and no row is packed edge to edge with them.
+    const names = (text.match(/a session about thing/g) ?? []).length;
+    expect(names).toBeLessThan(packed.length);
+    // Letters only: a backdrop of grid dots is not clutter, names are.
+    const busiest = Math.max(...plain.map((r) => (r.match(/[a-z]/g) ?? []).length));
+    expect(busiest).toBeLessThan(48);
+  });
 
-    it(`${style.id} never draws a marker on top of a neighbor's name`, () => {
-      // Two trees a row apart: any marker taller than one row (canopy's
-      // crown) used to land in the middle of the other's label.
-      const pair = [
-        tree({ treeId: "upper", name: "upper-tree-name", x: 0, y: -0.7, status: "running", live: true }),
-        tree({ treeId: "lower", name: "lower-tree-name", x: 0.3, y: 0.7, status: "waiting", seen: false }),
-      ];
-      const { text } = render(style.id, 3, pair, "lower");
-      expect(text).toContain("lower-tree-name"); // selected: always intact
-    });
-  }
+  it("never draws a marker on top of a neighbor's name", () => {
+    // Two trees a row apart: any marker taller than one row (canopy's
+    // crown) used to land in the middle of the other's label.
+    const pair = [
+      tree({ treeId: "upper", name: "upper-tree-name", x: 0, y: -0.7, status: "running", live: true }),
+      tree({ treeId: "lower", name: "lower-tree-name", x: 0.3, y: 0.7, status: "waiting", seen: false }),
+    ];
+    const { text } = render(3, pair, "lower");
+    expect(text).toContain("lower-tree-name"); // selected: always intact
+  });
 });
 
 describe("label placer", () => {
@@ -208,15 +190,16 @@ describe("ui state", () => {
     else process.env.PINES_HOME = prev;
   });
 
-  it("keeps a known style, migrates blueprint, falls back for unknowns", () => {
+  it("ignores unknown keys, like the retired forestStyle of older versions", () => {
     const home = mkdtempSync(join(tmpdir(), "pines-ui-"));
     process.env.PINES_HOME = home;
-    writeFileSync(join(home, "ui.json"), JSON.stringify({ forestStyle: "classic" }));
-    expect(loadUiState().forestStyle).toBe("classic");
-    // blueprint was absorbed into canopy — a saved pick follows it there.
-    writeFileSync(join(home, "ui.json"), JSON.stringify({ forestStyle: "blueprint" }));
-    expect(loadUiState().forestStyle).toBe("canopy");
-    writeFileSync(join(home, "ui.json"), JSON.stringify({ forestStyle: "from-the-future" }));
-    expect(loadUiState().forestStyle).toBe(DEFAULT_STYLE_ID);
+    writeFileSync(
+      join(home, "ui.json"),
+      JSON.stringify({ forestStyle: "cards", sidebarVisible: false, sidebarWidth: 40 }),
+    );
+    const ui = loadUiState();
+    expect(ui.sidebarVisible).toBe(false);
+    expect(ui.sidebarWidth).toBe(40);
+    expect("forestStyle" in ui).toBe(false);
   });
 });

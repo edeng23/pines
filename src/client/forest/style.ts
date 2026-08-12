@@ -8,19 +8,14 @@
  * via `footprint`, so no style can paint over another tree's marker.
  *
  * Status semantics (color + animation) are deliberately *not* a style's
- * choice: they come from `status.ts` so a yellow spinner means "working" in
- * every option.
+ * choice: they come from `status.ts` so a yellow spinner always means
+ * "working".
  */
 import type { TreeSummary } from "../../shared/types.js";
 import type { Canvas } from "./canvas.js";
 import type { Viewport } from "./camera.js";
 
-export type ForestStyleId =
-  | "classic"
-  | "canopy"
-  | "constellation"
-  | "cards"
-  | "contour";
+export type ForestStyleId = "canopy";
 
 export interface Point {
   x: number;
@@ -44,8 +39,6 @@ export interface PlacedTree {
 
 export interface DrawCtx extends PlacedTree {
   spinnerFrame: number;
-  /** Wall clock for age labels; passed in so rendering stays deterministic. */
-  now: number;
   /** Display name, already resolved (session name → cwd → id). */
   title: string;
   /**
@@ -81,7 +74,6 @@ export interface DrawCtx extends PlacedTree {
 export interface UnderlayCtx {
   vp: Viewport;
   visible: PlacedTree[];
-  now: number;
   /**
    * Median distance in cells between a tree and its nearest neighbor. A
    * backdrop that looks considered around eight well-spaced trees turns to
@@ -100,7 +92,7 @@ export interface ForestStyle {
   footprint(
     t: TreeSummary,
     pos: Point,
-    opts: { selected: boolean; now: number; nameMax: number; spacing: number },
+    opts: { selected: boolean; nameMax: number; spacing: number },
   ): Rect;
   /**
    * Cells the marker occupies for real — reserved for every tree before

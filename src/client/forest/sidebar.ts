@@ -180,9 +180,15 @@ export function renderSidebar(input: SidebarRenderInput): {
     const { title, fallback } = treeTitle(t);
     // ` ✻ title…… dir 12m ` — title flexes; the directory is a light label
     // (Claude Agents keeps cwd as metadata, never the name).
-    const dirChip = width >= 32 && t.name && t.cwd ? basename(t.cwd).slice(0, 10) : "";
+    // The row template costs exactly 5 cells of chrome (edges, glyph, gaps):
+    // reserve no more than that, every spare cell belongs to the title.
+    const avail = Math.max(4, width - 5 - age.length);
+    let dirChip = width >= 32 && t.name && t.cwd ? basename(t.cwd).slice(0, 10) : "";
+    // The title is the information; the chip is garnish. A title that would
+    // be cropped to make room for the chip wins the space instead.
+    if (dirChip && title.length > avail - (dirChip.length + 1)) dirChip = "";
     const chipW = dirChip ? dirChip.length + 1 : 0;
-    const nameW = Math.max(4, width - 4 - age.length - 2 - chipW);
+    const nameW = Math.max(4, avail - chipW);
     const shownName = title.length > nameW ? title.slice(0, nameW - 1) + "…" : title.padEnd(nameW);
     const nameSgr = selected ? "7" : fallback ? MUTED : t.seen ? "0" : "1";
     const chip = dirChip ? `\x1b[${MUTED}m${dirChip}\x1b[0m ` : "";

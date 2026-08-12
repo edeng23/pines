@@ -20,6 +20,8 @@ export interface IngestResult {
   treeId: string;
   parsed: ParsedSession;
   isNew: boolean;
+  /** The session file's mtime — the honest "last activity" clock for the tree. */
+  mtimeMs: number;
 }
 
 function ftsRowsFrom(parsed: ParsedSession, treeId: string, sinceByte: number): Array<{
@@ -114,5 +116,5 @@ export async function ingestSessionFile(
 
   if (newRows.length > 0) insertFts(db, newRows);
 
-  return { treeId, parsed: full, isNew };
+  return { treeId, parsed: full, isNew, mtimeMs: Math.floor(st.mtimeMs) };
 }
