@@ -1,13 +1,18 @@
 name: Release
 
-# Cutting a release is `git tag v0.2.0 && git push origin v0.2.0`. Nothing
-# publishes on a branch push — only a v* tag reaches this workflow.
+# A release is a version bump reaching main. When package.json names a version
+# that has no matching v* tag yet, this workflow builds, tests, re-checks the
+# tarball, publishes to npm, and creates the tag + GitHub release itself —
+# merging the bump PR is the whole ceremony. Pushing a v* tag by hand still
+# works and takes the same guarded path. Ordinary merges (version unchanged)
+# no-op at the first step.
 on:
   push:
+    branches: [main]
     tags: ["v*"]
 
 permissions:
-  contents: write # create the GitHub release
+  contents: write # create the tag + GitHub release
   id-token: write # mint the OIDC token npm trusted publishing exchanges for a credential
 
 jobs:
@@ -18,8 +23,10 @@ jobs:
       - uses: actions/checkout@v4
         with:
           # --generate-notes diffs against the previous tag, which needs more
-          # than the shallow single commit checkout gives us by default.
+          # than the shallow single commit checkout gives us by default; the
+          # tags are the "already released?" ledger the decide step reads.
           fetch-depth: 0
+          fetch-tags: true
       - uses: pnpm/action-setup@v4
         with:
           version: 10
@@ -29,37 +36,56 @@ jobs:
           cache: pnpm
           registry-url: https://registry.npmjs.org
 
+      # A tag that disagrees with package.json ships the wrong version number,
+      # and npm burns a version forever — it can never be republished, even
+      # after an unpublish. On a main push there is nothing to disagree with:
+      # the version IS package.json's, and the guard becomes "was it already
+      # tagged?", which is what lets every non-bump merge land here for free.
+      - name: Decide whether this push is a release
+        id: decide
+        run: |
+          set -euo pipefail
+          pkg="$(node -p "require('./package.json').version")"
+          echo "version=${pkg}" >> "$GITHUB_OUTPUT"
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            tag="${GITHUB_REF_NAME#v}"
+            if [ "$tag" != "$pkg" ]; then
+              echo "tag ${GITHUB_REF_NAME} implies version ${tag}, package.json says ${pkg}"
+              exit 1
+            fi
+            echo "release=true" >> "$GITHUB_OUTPUT"
+            echo "releasing ${pkg} (tag push)"
+          elif git rev-parse -q --verify "refs/tags/v${pkg}" >/dev/null; then
+            echo "release=false" >> "$GITHUB_OUTPUT"
+            echo "v${pkg} is already tagged — nothing to release"
+          else
+            echo "release=true" >> "$GITHUB_OUTPUT"
+            echo "releasing ${pkg} (version bump reached main)"
+          fi
+
       # Trusted publishing needs npm >= 11.5.1. Node 22 still bundles npm 10.x,
       # which has no idea what an OIDC exchange is and falls back to asking for
       # a token that does not exist here.
       - name: Upgrade npm for trusted publishing
+        if: steps.decide.outputs.release == 'true'
         run: |
           npm install -g npm@latest
           npm --version
 
-      # A tag that disagrees with package.json ships the wrong version number,
-      # and npm burns a version forever — it can never be republished, even
-      # after an unpublish. Cheaper to fail here than to skip to 0.1.1.
-      - name: Assert tag matches package.json version
-        run: |
-          set -euo pipefail
-          tag="${GITHUB_REF_NAME#v}"
-          pkg="$(node -p "require('./package.json').version")"
-          if [ "$tag" != "$pkg" ]; then
-            echo "tag ${GITHUB_REF_NAME} implies version ${tag}, package.json says ${pkg}"
-            exit 1
-          fi
-          echo "releasing ${pkg}"
-
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm build
-      - run: pnpm typecheck
-      - run: pnpm test
+      - if: steps.decide.outputs.release == 'true'
+        run: pnpm install --frozen-lockfile
+      - if: steps.decide.outputs.release == 'true'
+        run: pnpm build
+      - if: steps.decide.outputs.release == 'true'
+        run: pnpm typecheck
+      - if: steps.decide.outputs.release == 'true'
+        run: pnpm test
 
       # Same guard as CI's `package` job. It runs again here because CI green on
-      # a branch does not prove the tagged tree still packs correctly, and a
+      # a branch does not prove the released tree still packs correctly, and a
       # tarball missing schema.sql dies in openDb before the daemon ever binds.
       - name: Assert runtime assets survived packing
+        if: steps.decide.outputs.release == 'true'
         run: |
           set -euo pipefail
           tarball="$(pwd)/$(npm pack --silent)"
@@ -80,15 +106,34 @@ jobs:
       # so nothing else is being skipped.
       # --provenance is explicit: relying on npm to infer it from CI has been
       # unreliable in practice.
+      # The "already published" check makes a re-run after a half-finished
+      # release repair the tag and GitHub release instead of dying on npm's
+      # "version already exists".
       - name: Publish to npm
-        run: npm publish --provenance --access public --ignore-scripts
+        if: steps.decide.outputs.release == 'true'
+        run: |
+          set -euo pipefail
+          v="${{ steps.decide.outputs.version }}"
+          if [ -n "$(npm view "@edeng23/pines@${v}" version 2>/dev/null)" ]; then
+            echo "npm already has ${v} — skipping publish"
+          else
+            npm publish --provenance --access public --ignore-scripts
+          fi
 
       # After the publish, so a failed publish does not strand a GitHub release
-      # pointing at a version nobody can install.
-      - name: Create GitHub release
+      # pointing at a version nobody can install. On a main push this is also
+      # what mints the v* tag: gh tags the pushed commit as part of creating
+      # the release. (Tags created with the workflow token do not trigger
+      # workflows, so the v* trigger above cannot recurse on it.)
+      - name: Create GitHub release (and tag)
+        if: steps.decide.outputs.release == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$GITHUB_REF_NAME" \
-            --title "$GITHUB_REF_NAME" \
-            --generate-notes
+          set -euo pipefail
+          v="v${{ steps.decide.outputs.version }}"
+          if gh release view "$v" >/dev/null 2>&1; then
+            echo "release $v already exists"
+          else
+            gh release create "$v" --target "$GITHUB_SHA" --title "$v" --generate-notes
+          fi
