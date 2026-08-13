@@ -1,16 +1,19 @@
 # Releasing
 
-Releases are cut by pushing a tag. `.github/workflows/release.yml` does the rest:
-it verifies the tag against `package.json`, builds, runs the suite, re-checks the
-tarball, publishes to npm with provenance, and opens the GitHub release.
+Releases are cut by merging a version bump to `main`. When a push to `main`
+carries a `package.json` version that has no `v*` tag yet,
+`.github/workflows/release.yml` does the rest: builds, runs the suite,
+re-checks the tarball, publishes to npm with provenance, and creates the tag
+and GitHub release itself.
 
 ```sh
-# bump "version" in package.json first, and commit it
-git tag v0.2.0
-git push origin v0.2.0
+# on a branch: bump "version" in package.json, commit, open a PR, merge it.
+# that's the whole ceremony — the workflow tags and publishes on the merge.
 ```
 
-Nothing publishes on a branch push. Only a `v*` tag triggers the workflow.
+Merges that don't change the version no-op at the workflow's first step.
+Pushing a `v*` tag by hand still works too (same guarded path, and the tag
+must match `package.json`) — useful for releasing an older commit.
 
 ## One-time bootstrap
 
@@ -37,19 +40,21 @@ Then attach the trusted publisher so every later release is automated:
    - Repository: `pines`
    - Workflow filename: `release.yml`
    - Environment: leave blank
-6. Tag `v0.1.0` and push it, to confirm the automated path works end to end.
+6. Merge a version bump to `main`, to confirm the automated path end to end.
 
 After step 5, no npm credential is needed on any machine or in any secret.
 
 ## Notes
 
 - npm never lets a version number be reused, even after an unpublish, and the
-  unpublish window is only 72 hours. The workflow's tag-vs-`package.json` check
-  exists because getting this wrong costs a version number permanently.
+  unpublish window is only 72 hours. The workflow's guards (tag must match
+  `package.json`; an already-tagged version never re-releases) exist because
+  getting this wrong costs a version number permanently.
 - The publish step passes `--ignore-scripts` to skip `prepublishOnly`. Its
   `typecheck` and `test` already ran as explicit steps in the same job; running
   them twice only doubles exposure to the timing flakes in the daemon and
   extension-status suites.
-- If a release fails *after* the npm publish but before the GitHub release, do
-  not retag. Create the GitHub release by hand:
-  `gh release create v0.2.0 --generate-notes`.
+- If a release fails *after* the npm publish but before the GitHub release,
+  just re-run the workflow (or push any commit to `main`): the publish step
+  skips versions npm already has, and the release step then repairs the
+  missing tag + GitHub release idempotently.
