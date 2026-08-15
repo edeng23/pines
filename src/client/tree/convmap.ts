@@ -10,7 +10,7 @@
  * cursor is highlighted so the mini doubles as a you-are-here marker.
  */
 import { statusGlyph, statusSgr } from "../forest/view.js";
-import { FAINT, MUTED } from "../theme.js";
+import { FAINT, GRID, MUTED } from "../theme.js";
 import { spliceCustom } from "./lanegraph.js";
 import type { TreeDetail, TreeSummary } from "../../shared/types.js";
 
@@ -197,10 +197,13 @@ export function renderConvMini(
     railSgr[y]![x] = sgr;
   };
 
-  // The flow's route reads bold: a rail is on the route when both of its
-  // endpoints are (root → tip is a single ancestor chain in the skeleton).
+  // Flow highlight works by CONTRAST, not just weight: the route is drawn
+  // bold while everything off it recedes to the grid gray — bold alone is
+  // invisible in half the terminal fonts. A rail is on the route when both
+  // of its endpoints are (root → tip is one ancestor chain in the skeleton).
+  const dimming = !!opts.routeIds;
   const onRoute = (i: number): boolean => opts.routeIds?.has(nodes[i]!.id) ?? false;
-  const boldIf = (b: boolean, sgr: string): string => (b ? `1;${sgr}` : sgr);
+  const boldIf = (b: boolean, sgr: string): string => (b ? `1;${sgr}` : dimming ? GRID : sgr);
 
   // Routes, per parent: a short horizontal stub out of the parent into a
   // vertical spine, then rounded elbows fanning to each child's station.
@@ -249,7 +252,9 @@ export function renderConvMini(
     }
   });
 
-  // Stations last: they sit on top of the rails.
+  // Stations last: they sit on top of the rails. Off-route agent tips keep
+  // their status COLOR (status is information, never dimmed) but lose bold;
+  // off-route structure (roots, interior dots) recedes with the rails.
   nodes.forEach((n, i) => {
     const here = n.id === opts.cursorSkelId;
     const route = onRoute(i);
@@ -257,15 +262,15 @@ export function renderConvMini(
     if (tip) {
       glyph[n.y]![n.x] = {
         ch: statusGlyph(tip, opts.spinnerFrame),
-        sgr: here ? "7" : boldIf(route, statusSgr(tip)),
+        sgr: here ? "7" : route ? `1;${statusSgr(tip)}` : statusSgr(tip),
       };
       hits.set(miniHitKey(n.x, n.y), n.id);
       hits.set(miniHitKey(n.x + 1, n.y), n.id);
       hits.set(miniHitKey(n.x - 1, n.y), n.id);
     } else if (n.parent === -1) {
-      glyph[n.y]![n.x] = { ch: "○", sgr: here ? "7" : boldIf(route, "36") };
+      glyph[n.y]![n.x] = { ch: "○", sgr: here ? "7" : route ? "1;36" : dimming ? GRID : "36" };
     } else {
-      glyph[n.y]![n.x] = { ch: "·", sgr: here ? "7" : boldIf(route, MUTED) };
+      glyph[n.y]![n.x] = { ch: "·", sgr: here ? "7" : route ? "1" : dimming ? GRID : MUTED };
     }
   });
 

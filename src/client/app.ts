@@ -466,7 +466,7 @@ export async function runApp(): Promise<void> {
       body = renderTreeBody(view);
       // The selected row explains what ⏎ does there; keep the bar terse and
       // front-load what narrow terminals would otherwise cut off.
-      hints = "⏎ attach/branch · ← forest · f flow · b branch · / search · L label · r rename · 1-9 branch · ↑↓ move ";
+      hints = "⏎ attach/branch · ← forest · f flow · ⇥ next branch · b branch · / search · L label · r rename · ↑↓ move ";
     }
     if (overlay) {
       composeOverlay(body, view);
@@ -883,7 +883,8 @@ export async function runApp(): Promise<void> {
         "forest   s=similar conversations (semantic neighbors of the selection)",
         "tree     j/k=move  ↵/→ = attach at a ● tip (an agent lives there), or grow",
         "tree     a branch: after a reply — or BESIDE a question (it stays out)",
-        "tree     f=flow (one branch's conversation) ⇄ full tree  1-9=go to branch",
+        "tree     f=flow (one branch's conversation) ⇄ full tree",
+        "tree     Tab/shift+Tab=next/prev branch (in flow: switches the flow)  1-9=nth",
         "tree     b=branch menu  L=label  r=rename this tree (its forest name)",
         `pi view  ${prefixName} ←/d=tree  ${prefixName} f=forest  ${prefixName} n=next attention`,
         `pi view  ${prefixName} ${prefixName}=send ${prefixName} to pi itself`,
@@ -1598,6 +1599,26 @@ export async function runApp(): Promise<void> {
           if (tip) gotoTipNode(tip.nodeId, tip.summary.treeId);
         }
         return;
+      case "\t":
+      case "\x1b[Z": {
+        // Cycle the branches: cursor to the next/previous tip — and in flow
+        // mode that IS switching flows, since the flow follows the cursor.
+        const tips = mode.view.tips;
+        if (tips.length === 0) return;
+        const selNode = mode.view.rows[mode.selected]?.a.nodeId;
+        const flowId = mode.flowTreeId;
+        const at = mode.flowOnly
+          ? tips.findIndex((t) => t.summary.treeId === flowId)
+          : tips.findIndex((t) => t.nodeId === selNode);
+        const dir = key === "\t" ? 1 : -1;
+        const next = tips[(((at < 0 ? 0 : at) + dir) % tips.length + tips.length) % tips.length]!;
+        gotoTipNode(next.nodeId, next.summary.treeId);
+        if (mode.flowOnly) {
+          const s = next.summary;
+          showToast(`flow ${next.num}/${tips.length}: ${next.headExcerpt ?? treeTitle(s).title}`);
+        }
+        return;
+      }
       case "\r":
       case "\x1b[C": {
         // ⏎/→: open ⋯/[+] rows; attach at a tip (an agent lives there);

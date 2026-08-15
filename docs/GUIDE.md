@@ -118,7 +118,7 @@ and a first run — all placed by the same layout the daemon uses.
 | view | keys / mouse |
 |---|---|
 | forest | `↑`/`↓` move through the sidebar list · `Enter` attach · `→` open tree view · wheel = zoom at cursor · drag = pan · click = select · double-click = open (canvas) / attach (sidebar) · `hjkl` pan · `+`/`-` zoom · `0` fit · `Tab` cycle by attention · `o` jump to most urgent · `a` attach · `n` new tree and attach · `r`/`L` rename tree · `A`/`Ctrl+X` archive/unarchive · `.` show/hide archived · `S` sidebar · `[`/`]` sidebar width · `x` kill agent · `R` relayout · `s` similar conversations · `/` search · `?` help |
-| tree | `↑`/`↓` or `j`/`k` move · `→`/`Enter` — on a tip (a node showing an agent's status): attach to that branch's agent (resume if dormant); on a `⋯` row: expand; on a `[+]` row: unfold; on any other message: grow a new branch there with its own agent and attach (from a question: *beside* it — the question stays out) · `f` flow (one branch's conversation) ⇄ full tree · `1`-`9` jump to a branch tip · `←`/`Esc` back to the forest · `b` branch menu (with/without agent) · `L` label · `r` rename tree · `/` search |
+| tree | `↑`/`↓` or `j`/`k` move · `→`/`Enter` — on a tip (a node showing an agent's status): attach to that branch's agent (resume if dormant); on a `⋯` row: expand; on a `[+]` row: unfold; on any other message: grow a new branch there with its own agent and attach (from a question: *beside* it — the question stays out) · `f` flow (one branch's conversation) ⇄ full tree · `Tab`/`Shift+Tab` next/prev branch · `1`-`9` jump to a branch tip · `←`/`Esc` back to the forest · `b` branch menu (with/without agent) · `L` label · `r` rename tree · `/` search |
 | attached pi | everything goes to pi, except the prefix `Ctrl+t`: `←`/`d` = back to tree · `f` = forest · `n` = next attention target · `Ctrl+t Ctrl+t` = send a literal Ctrl+t |
 
 Zooming is semantic: the sprite is the tree at every distance — maturity by
@@ -169,9 +169,10 @@ own navigation.)
 
 **Flow view** (`f`): narrows the transcript to one branch's conversation —
 the cursor's — root to tip, nothing else. The metro map keeps the whole
-shape with that route drawn bold, and the agents panel keeps every branch:
-jumping to another agent (`1`-`9`, click) switches the flow to it. `f`
-again restores the full tree.
+shape with the flow's route drawn bold while everything off it recedes to
+the grid gray, the flowed agent carries a `▸` in the panel, and the panel
+keeps every branch: `Tab`/`Shift+Tab` cycle the flow through them, and
+`1`-`9` or a click jumps straight to one. `f` again restores the full tree.
 
 **Search** (`/`): SQLite FTS5 over session names, every user message (abandoned
 branches included), compaction/branch summaries, and labels. `Enter` jumps to

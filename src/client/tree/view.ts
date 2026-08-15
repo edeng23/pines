@@ -232,8 +232,11 @@ export function renderConversation(
       const info = quiet
         ? `\x1b[${MUTED}m· ${humanAge(s.mtime, opts.now)}${RESET}`
         : `\x1b[${MUTED}m· ${stateWord(s)} · ${humanAge(s.mtime, opts.now)}${RESET}`;
-      const nameSgr = !s.seen ? "1" : here ? "1" : s.live ? "0" : MUTED;
-      const line = ` ${glyph} \x1b[${nameSgr}m${label}${RESET} ${info}`;
+      // Flow mode: the flowed branch is THE one on screen — mark its row.
+      const flowed = view.flowTreeId === s.treeId;
+      const lead = flowed ? `\x1b[1m▸${RESET}` : " ";
+      const nameSgr = !s.seen || here || flowed ? "1" : s.live ? "0" : MUTED;
+      const line = `${lead}${glyph} \x1b[${nameSgr}m${label}${RESET} ${info}`;
       if (here) {
         const clipped = clipAnsi(line, lay.sideW);
         const fill = Math.max(0, lay.sideW - visibleLength(clipped));
