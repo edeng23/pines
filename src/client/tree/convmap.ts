@@ -10,7 +10,7 @@
  * cursor is highlighted so the mini doubles as a you-are-here marker.
  */
 import { statusGlyph, statusSgr } from "../forest/view.js";
-import { FAINT, MUTED } from "../theme.js";
+import { FAINT, GRID, MUTED } from "../theme.js";
 import { spliceCustom } from "./lanegraph.js";
 import type { TreeDetail, TreeSummary } from "../../shared/types.js";
 
@@ -162,6 +162,8 @@ export function renderConvMini(
     height: number;
     spinnerFrame: number;
     cursorSkelId?: string | null;
+    /** Skeleton ids on the flow's route — drawn bold (flow mode highlight). */
+    routeIds?: Set<string>;
   },
 ): ConvMini {
   const { width: w, height: h } = opts;
@@ -195,6 +197,14 @@ export function renderConvMini(
     railSgr[y]![x] = sgr;
   };
 
+  // Flow highlight works by CONTRAST, not just weight: the route is drawn
+  // bold while everything off it recedes to the grid gray — bold alone is
+  // invisible in half the terminal fonts. A rail is on the route when both
+  // of its endpoints are (root → tip is one ancestor chain in the skeleton).
+  const dimming = !!opts.routeIds;
+  const onRoute = (i: number): boolean => opts.routeIds?.has(nodes[i]!.id) ?? false;
+  const boldIf = (b: boolean, sgr: string): string => (b ? `1;${sgr}` : dimming ? GRID : sgr);
+
   // Routes, per parent: a short horizontal stub out of the parent into a
   // vertical spine, then rounded elbows fanning to each child's station.
   nodes.forEach((p, pi) => {
@@ -203,13 +213,21 @@ export function renderConvMini(
     const cx = Math.min(...kids.map((k) => k.x));
     const sx = Math.max(p.x + 1, Math.min(p.x + 2, cx - 1));
     // Attachment rows on the spine: the parent's and every child's.
+    const parentOnRoute = onRoute(pi) && kids.some((k) => onRoute(nodes.indexOf(k)));
     const rows = [
-      { y: p.y, x: p.x, sgr: laneOf[pi]!, from: "parent" as const },
+      {
+        y: p.y,
+        x: p.x,
+        sgr: boldIf(parentOnRoute, laneOf[pi]!),
+        from: "parent" as const,
+        route: parentOnRoute,
+      },
       ...kids.map((k) => ({
         y: k.y,
         x: k.x,
-        sgr: laneOf[nodes.indexOf(k)]!,
+        sgr: boldIf(onRoute(pi) && onRoute(nodes.indexOf(k)), laneOf[nodes.indexOf(k)]!),
         from: "child" as const,
+        route: onRoute(pi) && onRoute(nodes.indexOf(k)),
       })),
     ].sort((a, b) => a.y - b.y);
     const topY = rows[0]!.y;
@@ -234,24 +252,27 @@ export function renderConvMini(
     }
   });
 
-  // Stations last: they sit on top of the rails.
-  for (const n of nodes) {
+  // Stations last: they sit on top of the rails. Off-route agent tips keep
+  // their status COLOR (status is information, never dimmed) but lose bold;
+  // off-route structure (roots, interior dots) recedes with the rails.
+  nodes.forEach((n, i) => {
     const here = n.id === opts.cursorSkelId;
+    const route = onRoute(i);
     const tip = n.tips?.[0];
     if (tip) {
       glyph[n.y]![n.x] = {
         ch: statusGlyph(tip, opts.spinnerFrame),
-        sgr: here ? "7" : statusSgr(tip),
+        sgr: here ? "7" : route ? `1;${statusSgr(tip)}` : statusSgr(tip),
       };
       hits.set(miniHitKey(n.x, n.y), n.id);
       hits.set(miniHitKey(n.x + 1, n.y), n.id);
       hits.set(miniHitKey(n.x - 1, n.y), n.id);
     } else if (n.parent === -1) {
-      glyph[n.y]![n.x] = { ch: "○", sgr: here ? "7" : "36" };
+      glyph[n.y]![n.x] = { ch: "○", sgr: here ? "7" : route ? "1;36" : dimming ? GRID : "36" };
     } else {
-      glyph[n.y]![n.x] = { ch: "·", sgr: here ? "7" : MUTED };
+      glyph[n.y]![n.x] = { ch: "·", sgr: here ? "7" : route ? "1" : dimming ? GRID : MUTED };
     }
-  }
+  });
 
   const lines: string[] = [];
   for (let y = 0; y < h; y++) {

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  branchTargetOf,
   buildConvView,
   cRowIndexOf,
   exchangeEndOf,
@@ -222,6 +223,50 @@ describe("conversation view", () => {
     expect(v.pendingMembers).toBe(0);
   });
 
+  it("flow mode shows one session's path only, keeping the full map and panel", () => {
+    const v = buildConvView(harness({ flowTreeId: "kid" }));
+    const shownNodes = v.rows.map((r) => r.a.nodeId).filter(Boolean);
+    // Only the kid's conversation: shared prefix + its own turns. The
+    // root's divergent exchange (u2 → a2) leaves the transcript entirely.
+    expect(shownNodes).toEqual(expect.arrayContaining(["u1", "a1", "u3", "a3"]));
+    expect(shownNodes).not.toContain("u2");
+    expect(shownNodes).not.toContain("a2");
+    expect(v.leafId).toBe("a3");
+    expect(v.flowTreeId).toBe("kid");
+    expect(v.flowPath).toEqual(new Set(["u1", "a1", "u3", "a3"]));
+    // The metro map keeps the WHOLE structure; the panel keeps every agent.
+    expect(v.detail.nodes["a2"]).toBeDefined();
+    expect(v.tips.map((t) => t.summary.treeId)).toEqual(
+      expect.arrayContaining(["root", "kid"]),
+    );
+    // Flowing the root hides the kid's turns instead.
+    const r = buildConvView(harness({ flowTreeId: "root" }));
+    const rootNodes = r.rows.map((row) => row.a.nodeId).filter(Boolean);
+    expect(rootNodes).toContain("a2");
+    expect(rootNodes).not.toContain("u3");
+    // An unknown flow session falls back to the full tree.
+    const f = buildConvView(harness({ flowTreeId: "nope" }));
+    expect(f.flowTreeId).toBeNull();
+    expect(f.rows.map((row) => row.a.nodeId).filter(Boolean)).toContain("u2");
+  });
+
+  it("flow mode survives a root whose parentId points outside the family", () => {
+    // toTreeDetail legally produces roots that keep a verbatim parentId not
+    // present in the file — the upward walk must stop at the family's edge,
+    // not crash the rebuild on a dangling ancestor.
+    const dangling = rootDetail();
+    dangling.nodes["u1"] = { ...dangling.nodes["u1"]!, parentId: "gone0000" };
+    const v = buildConvView(
+      harness({
+        detailOf: (id) => (id === "root" ? dangling : kidDetail()),
+        flowTreeId: "root",
+      }),
+    );
+    const shown = v.rows.map((r) => r.a.nodeId).filter(Boolean);
+    expect(shown).toEqual(expect.arrayContaining(["u1", "a1", "u2", "a2"]));
+    expect(v.flowPath!.has("gone0000")).toBe(false);
+  });
+
   it("streams in: missing member details are requested, view stays usable", () => {
     const wanted: string[] = [];
     const v = buildConvView(
@@ -389,5 +434,28 @@ describe("branch identity and exchange snapping", () => {
     expect(exchangeEndOf(d, "t1")).toBe("a1"); // mid-run too
     expect(exchangeEndOf(d, "a1")).toBe("a1"); // a reply is already the end
     expect(exchangeEndOf(d, "u2")).toBe("u2"); // nothing to follow
+  });
+
+  it("branchTargetOf: a question branches BESIDE itself, a reply after itself", () => {
+    const d: TreeDetail = {
+      treeId: "t",
+      leafId: "a1",
+      rootIds: ["u1"],
+      nodes: {
+        u1: node("u1", null, "user", ["t1"]),
+        t1: node("t1", "u1", "tool", ["a1"]),
+        a1: node("a1", "t1", "assistant", ["u2"]),
+        u2: node("u2", "a1", "user", []),
+      },
+    };
+    // A user message forks from its parent — the question is NOT part of
+    // the new branch (chat-edit semantics), so the old answer can never
+    // read as answering the new question.
+    expect(branchTargetOf(d, "u2")).toEqual({ nodeId: "a1", excludesSelected: true });
+    // A reply (or mid-run tool) still branches after its exchange.
+    expect(branchTargetOf(d, "a1")).toEqual({ nodeId: "a1", excludesSelected: false });
+    expect(branchTargetOf(d, "t1")).toEqual({ nodeId: "a1", excludesSelected: false });
+    // A root question has nothing before it: falls back to exchange end.
+    expect(branchTargetOf(d, "u1")).toEqual({ nodeId: "a1", excludesSelected: false });
   });
 });

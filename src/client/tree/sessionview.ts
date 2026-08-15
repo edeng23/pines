@@ -45,6 +45,10 @@ export interface ConvView {
   rows: ConvRow[];
   /** Merged-tree leaf: the most recently active branch's end. */
   leafId: string | null;
+  /** Flow mode: the session whose linear conversation the rows show. */
+  flowTreeId: string | null;
+  /** Node ids on the flow's path (root → tip); set only in flow mode. */
+  flowPath?: Set<string>;
   /** Branches worth seeing, ordered as they appear in the transcript. */
   tips: PanelTip[];
   /** Dormant never-continued forks, by node — invisible until reused. */
@@ -74,6 +78,13 @@ export interface ConvViewInput {
   now?: number;
   /** Called for family members whose detail isn't cached yet (async fetch). */
   wantDetail?: (treeId: string) => void;
+  /**
+   * Flow mode: show only this session's conversation — the linear path from
+   * the root to its tip — instead of the whole merged family. The metro map
+   * keeps the full structure (with the flow's route highlighted); the panel
+   * keeps every agent, so jumping to one switches the flow.
+   */
+  flowTreeId?: string | null;
 }
 
 /**
@@ -115,6 +126,30 @@ export function exchangeEndOf(detail: TreeDetail, nodeId: string): string {
   return cur;
 }
 
+export interface BranchTarget {
+  nodeId: string;
+  /** True when the selected message itself stays OUT of the new branch. */
+  excludesSelected: boolean;
+}
+
+/**
+ * Where a branch grown at `nodeId` actually forks from.
+ *
+ * A reply (or tool run): the end of its exchange — branching from an answer
+ * lands after it. A USER message: its parent — the question is not part of
+ * the new branch, so your next message replaces it as a sibling (the way
+ * editing a message works in chat UIs) and the old answer can never read as
+ * answering the new question. A root question has nothing before it and
+ * falls back to exchange end.
+ */
+export function branchTargetOf(detail: TreeDetail, nodeId: string): BranchTarget {
+  const node = detail.nodes[nodeId];
+  if (node?.kind === "user" && node.parentId && detail.nodes[node.parentId]) {
+    return { nodeId: node.parentId, excludesSelected: true };
+  }
+  return { nodeId: exchangeEndOf(detail, nodeId), excludesSelected: false };
+}
+
 export function buildConvView(input: ConvViewInput): ConvView {
   const family = familyOf(
     input.rootTreeId,
@@ -150,12 +185,50 @@ export function buildConvView(input: ConvViewInput): ConvView {
     else shownAt.set(t.nodeId, [t.summary]);
   }
 
-  const atree = buildAsciiTree(merged.detail, {
+  // FLOW MODE: prune the transcript to one session's path — root to that
+  // session's tip, shared prefix included. The full merged detail stays in
+  // the view (ancestry walks, branch targets, the metro map all use it);
+  // only what the transcript RENDERS narrows.
+  let renderDetail = merged.detail;
+  let flowTreeId: string | null = null;
+  let flowPath: Set<string> | undefined;
+  if (input.flowTreeId) {
+    const tip = merged.tips.find((t) => t.summary.treeId === input.flowTreeId);
+    if (tip) {
+      flowTreeId = input.flowTreeId;
+      flowPath = new Set<string>();
+      let cur: string | null = tip.nodeId;
+      for (let guard = 0; cur && guard < 100_000; guard++) {
+        // Resolve BEFORE adding: a root may legally carry a parentId that
+        // isn't in the file (toTreeDetail keeps it verbatim), and this is
+        // the codebase's first upward walk — it must stop at the family's
+        // edge, not admit a dangling id the rebuild below would crash on.
+        const n: NodeSummary | undefined = merged.detail.nodes[cur];
+        if (!n) break;
+        flowPath.add(cur);
+        cur = n.parentId ?? null;
+      }
+      const nodes: Record<string, NodeSummary> = {};
+      for (const id of flowPath) {
+        const n = merged.detail.nodes[id];
+        if (!n) continue;
+        nodes[id] = { ...n, children: n.children.filter((c) => flowPath!.has(c)) };
+      }
+      renderDetail = {
+        treeId: merged.detail.treeId,
+        leafId: tip.nodeId,
+        rootIds: merged.detail.rootIds.filter((r) => flowPath!.has(r)),
+        nodes,
+      };
+    }
+  }
+
+  const atree = buildAsciiTree(renderDetail, {
     expandedRuns: input.expandedRuns,
     unfolded: input.unfolded,
     viewportH: input.viewportH,
     now: input.now,
-    keep: new Set(shownAt.keys()),
+    keep: new Set([...shownAt.keys()].filter((id) => !flowPath || flowPath.has(id))),
   });
 
   const rows: ConvRow[] = atree.rows.map((a) => ({
@@ -211,7 +284,10 @@ export function buildConvView(input: ConvViewInput): ConvView {
 
   return {
     rows,
-    leafId: merged.detail.leafId,
+    // In flow mode the "story so far" ends at the flow's own tip.
+    leafId: renderDetail.leafId,
+    flowTreeId,
+    flowPath,
     tips,
     parkedAt,
     parkedCount,
