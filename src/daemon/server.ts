@@ -28,6 +28,7 @@ import {
   type SimilarMsg,
   type SpawnTreeMsg,
 } from "../shared/protocol.js";
+import { pinesVersion } from "../shared/version.js";
 import { daemonLogPath, ensurePinesHome, socketPath } from "../shared/paths.js";
 import {
   clearDaemonPid,
@@ -478,8 +479,13 @@ export class Daemon {
             protocolVersion: PROTOCOL_VERSION,
             daemonPid: process.pid,
             piVersion: this.piVersion,
+            daemonVersion: pinesVersion(),
             forest: this.supervisor.forest(),
           });
+          const build = (raw as { buildVersion?: string }).buildVersion;
+          if (build !== undefined && build !== pinesVersion()) {
+            log(`client build ${build} differs from daemon build ${pinesVersion()}`);
+          }
           log(`client connected (${this.clients.size} total)`);
         } else {
           this.extBridge.handle(wire, raw as ExtensionToDaemon);

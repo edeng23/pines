@@ -15,7 +15,38 @@ import {
 } from "../shared/protocol.js";
 import type { TreeSummary } from "../shared/types.js";
 import { socketPath } from "../shared/paths.js";
-import { ensureDaemon } from "../daemon/lifecycle.js";
+import { ensureDaemon, restartDaemon } from "../daemon/lifecycle.js";
+import { isStaleDaemon, pinesVersion } from "../shared/version.js";
+
+/** Which build answered on the socket, and whether it is the one we installed. */
+export interface DaemonBuild {
+  /** Version the daemon reported; absent from daemons older than 0.1.5. */
+  daemonVersion?: string;
+  clientVersion: string;
+  /** True when the daemon is running code from a different install than ours. */
+  stale: boolean;
+  /** Live agents that kept us from replacing a stale daemon (0 if we tried). */
+  liveAgents: number;
+}
+
+/**
+ * One line explaining a stale daemon and how to finish the upgrade.
+ *
+ * Worth spelling out because the symptom is so misleading: the fix is in the
+ * installed code, the running daemon predates it, and the bug looks unfixed.
+ */
+export function staleDaemonMessage(build: DaemonBuild): string {
+  const running = build.daemonVersion ? `pines ${build.daemonVersion}` : "an older build";
+  const n = build.liveAgents;
+  const held =
+    n > 0
+      ? ` ${n} live agent${n === 1 ? " keeps" : "s keep"} it up`
+      : " it could not be replaced automatically";
+  return (
+    `daemon is running ${running}, you have ${build.clientVersion} — newer fixes are not active;` +
+    `${held}. Run 'pines kill' (sessions stay resumable), then start pines again.`
+  );
+}
 
 export interface DaemonClientEvents {
   forest_update: [{ upsert?: TreeSummary[]; remove?: string[] }];
@@ -30,11 +61,43 @@ export class DaemonClient extends EventEmitter<DaemonClientEvents> {
   private nextId = 1;
   private pending = new Map<string, (msg: ResultMsg | AttachOk) => void>();
   helloOk!: HelloOk;
+  /** Set once the handshake lands; callers warn on `stale`. */
+  build!: DaemonBuild;
 
+  /**
+   * Connect, and make sure we are talking to the build that was installed.
+   *
+   * A daemon outlives every upgrade of the package that spawned it, so `pines`
+   * routinely finds an old daemon on the socket running old code — the reason a
+   * shipped fix can look like it never landed. When nothing live would be lost
+   * we replace it here and the upgrade completes itself; when agents are up,
+   * killing them is the user's call, so we connect anyway and flag it.
+   */
   static async connect(size: { cols: number; rows: number }): Promise<DaemonClient> {
     await ensureDaemon();
+    const client = await DaemonClient.handshake(size);
+    if (!client.build.stale || client.build.liveAgents > 0) return client;
+
+    client.close();
+    try {
+      await restartDaemon();
+    } catch {
+      // A daemon we cannot replace still serves: reconnect and let the caller
+      // report the staleness rather than failing to start over it.
+    }
+    return DaemonClient.handshake(size);
+  }
+
+  private static async handshake(size: { cols: number; rows: number }): Promise<DaemonClient> {
     const client = new DaemonClient();
     await client.open(size);
+    const daemonVersion = client.helloOk.daemonVersion;
+    client.build = {
+      daemonVersion,
+      clientVersion: pinesVersion(),
+      stale: isStaleDaemon(daemonVersion),
+      liveAgents: client.helloOk.forest.filter((t) => t.live).length,
+    };
     return client;
   }
 
@@ -50,6 +113,7 @@ export class DaemonClient extends EventEmitter<DaemonClientEvents> {
           t: "hello",
           role: "client",
           protocolVersion: PROTOCOL_VERSION,
+          buildVersion: pinesVersion(),
           cols: size.cols,
           rows: size.rows,
         });

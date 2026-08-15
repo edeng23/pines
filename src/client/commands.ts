@@ -1,17 +1,20 @@
 /** One-shot CLI subcommands: spawn, status, kill. */
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
-import { connect } from "node:net";
-import { DaemonClient } from "./daemon-client.js";
+import { DaemonClient, staleDaemonMessage } from "./daemon-client.js";
 import {
   isProcessAlive,
   isServerListening,
   readDaemonPid,
+  requestDaemonShutdown,
   terminateDaemon,
 } from "../daemon/lifecycle.js";
-import { daemonPidPath, socketPath } from "../shared/paths.js";
-import { PROTOCOL_VERSION } from "../shared/protocol.js";
-import { Wire } from "../shared/wire.js";
+import { daemonPidPath } from "../shared/paths.js";
+
+/** Say so when the daemon answering us is not the build that was installed. */
+function warnIfStale(client: DaemonClient): void {
+  if (client.build.stale) process.stderr.write(`pines: ${staleDaemonMessage(client.build)}\n`);
+}
 
 function parseFlags(args: string[]): Map<string, string | true> {
   const flags = new Map<string, string | true>();
@@ -54,6 +57,9 @@ export async function spawnCommand(args: string[]): Promise<void> {
     process.stdout.write(`spawned ${res.newTreeId} in ${cwd}\n`);
   } else {
     process.stderr.write(`spawn failed: ${"err" in res ? res.err : "unknown error"}\n`);
+    // A failure from a stale daemon is a failure from code that was already
+    // fixed — say so here, where the error the user reads is printed.
+    warnIfStale(client);
     process.exitCode = 1;
   }
   client.close();
@@ -65,8 +71,10 @@ export async function statusCommand(): Promise<void> {
     return;
   }
   const client = await DaemonClient.connect({ cols: 80, rows: 24 });
-  const { forest, daemonPid } = client.helloOk;
-  process.stdout.write(`daemon: running (pid ${daemonPid}), ${forest.length} tree(s)\n`);
+  const { forest, daemonPid, daemonVersion } = client.helloOk;
+  const build = daemonVersion ? ` pines ${daemonVersion},` : "";
+  process.stdout.write(`daemon: running (pid ${daemonPid}),${build} ${forest.length} tree(s)\n`);
+  warnIfStale(client);
   for (const t of forest) {
     const agent = t.live ? "agent:live" : "         ";
     const name = t.name ?? t.treeId;
@@ -76,31 +84,6 @@ export async function statusCommand(): Promise<void> {
     );
   }
   client.close();
-}
-
-/**
- * Ask the daemon on the socket to shut down. Resolves with the pid it reported
- * (from hello_ok, or from hello_err when it speaks a different protocol), so a
- * caller can fall back to a signal when the conversation goes nowhere.
- */
-function requestShutdown(): Promise<{ closed: boolean; daemonPid?: number }> {
-  return new Promise((resolveDone) => {
-    let daemonPid: number | undefined;
-    const sock = connect(socketPath());
-    const wire = new Wire(sock);
-    const finish = (closed: boolean) => resolveDone({ closed, daemonPid });
-    sock.once("error", () => finish(false));
-    wire.on("close", () => finish(true));
-    wire.on("msg", (raw) => {
-      const msg = raw as { t?: string; daemonPid?: number };
-      if (msg.t === "hello_ok" || msg.t === "hello_err") daemonPid = msg.daemonPid;
-    });
-    sock.once("connect", () => {
-      wire.send({ t: "hello", role: "client", protocolVersion: PROTOCOL_VERSION, cols: 80, rows: 24 });
-      wire.send({ t: "shutdown" });
-    });
-    setTimeout(() => finish(false), 5000);
-  });
 }
 
 export async function killCommand(): Promise<void> {
@@ -115,7 +98,7 @@ export async function killCommand(): Promise<void> {
 
   let pid = recordedPid;
   if (listening) {
-    const { closed, daemonPid } = await requestShutdown();
+    const { closed, daemonPid } = await requestDaemonShutdown();
     pid = daemonPid ?? pid;
     // The socket closing only proves the connection ended — the daemon may
     // have rejected our handshake and hung up. Confirm it is really gone.

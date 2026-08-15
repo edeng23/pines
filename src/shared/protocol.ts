@@ -19,6 +19,8 @@ export interface ClientHello {
   protocolVersion: number;
   cols: number;
   rows: number;
+  /** Build version of the client install, for the daemon's log. */
+  buildVersion?: string;
 }
 
 export interface SpawnTreeMsg {
@@ -164,6 +166,12 @@ export interface HelloOk {
   forest: TreeSummary[];
   /** Version of the pi runtime this daemon launches (absent while probing). */
   piVersion?: string;
+  /**
+   * pines version of the build the daemon is running. Absent from daemons
+   * older than 0.1.5, which is itself the answer the client needs: a daemon
+   * that cannot name its build is not the one just installed.
+   */
+  daemonVersion?: string;
 }
 
 export interface HelloErr {

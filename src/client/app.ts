@@ -9,7 +9,7 @@
  */
 import { createRequire } from "node:module";
 import { homedir } from "node:os";
-import { DaemonClient } from "./daemon-client.js";
+import { DaemonClient, staleDaemonMessage } from "./daemon-client.js";
 import { pinesHome } from "../shared/paths.js";
 import { startBoot } from "./boot.js";
 import type { SearchHit, TreeDetail, TreeSummary, Camera } from "../shared/types.js";
@@ -631,10 +631,10 @@ export async function runApp(): Promise<void> {
     m.selected = idx >= 0 ? idx : Math.max(0, m.view.rows.length - 1);
   }
 
-  function showToast(text: string): void {
-    toast = { text, until: Date.now() + 3000 };
+  function showToast(text: string, ms = 3000): void {
+    toast = { text, until: Date.now() + ms };
     requestRender();
-    setTimeout(() => requestRender(), 3100);
+    setTimeout(() => requestRender(), ms + 100);
   }
 
   /* ----------------------------- data fetching ----------------------------- */
@@ -1992,6 +1992,10 @@ export async function runApp(): Promise<void> {
   });
 
   out.write(ALT_SCREEN_ENTER + MOUSE_ENABLE);
+  // A daemon older than this install serves the forest fine but runs the code
+  // it was started with — long enough on screen to be read, since every bug it
+  // still has will look like a bug in the version the header claims.
+  if (client.build.stale) showToast(staleDaemonMessage(client.build), 12_000);
   requestRender();
 }
 

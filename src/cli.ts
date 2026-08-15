@@ -9,13 +9,7 @@
  *   pines kill         stop the daemon (and its pi children)
  *   pines --version    print version
  */
-import { createRequire } from "node:module";
-
-const require = createRequire(import.meta.url);
-
-function version(): string {
-  return (require("../package.json") as { version: string }).version;
-}
+import { pinesVersion as version } from "./shared/version.js";
 
 async function main(): Promise<void> {
   // Piped output (e.g. `pines status | head`) must not crash on EPIPE.
