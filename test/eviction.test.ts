@@ -8,14 +8,21 @@
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_MAX_LIVE_AGENTS, Supervisor, type TreeRecord } from "../src/daemon/supervisor.js";
+import { ExtBridge } from "../src/daemon/extbridge.js";
 import type { AgentProc, AgentProcOptions } from "../src/daemon/agents.js";
+import type { Wire } from "../src/shared/wire.js";
+
+/** Fake AgentProc that also records every signal it was sent. */
+interface FakeAgent extends AgentProc {
+  signals: string[];
+}
 
 /**
  * Fake pi with configurable death semantics:
  * - "sync":   kill() exits on the spot (the simplest tests);
  * - "manual": kill() queues the exit until flush() — a real SIGTERM window,
  *             held open as long as the test wants;
- * - "never":  kill() is ignored — a wedged pty whose exit never arrives.
+ * - "never":  kill() only records — a wedged pty whose exit never arrives.
  */
 function agentFactory(mode: "sync" | "manual" | "never") {
   const pending: Array<() => void> = [];
@@ -31,6 +38,7 @@ function agentFactory(mode: "sync" | "manual" | "never") {
       pid: 0,
       cols: opts.cols,
       rows: opts.rows,
+      signals: [] as string[],
       get isRunning() {
         return running;
       },
@@ -42,7 +50,8 @@ function agentFactory(mode: "sync" | "manual" | "never") {
       snapshotSync() {
         return "";
       },
-      kill() {
+      kill(signal = "SIGTERM") {
+        this.signals.push(signal);
         if (mode === "sync") exit();
         else if (mode === "manual") pending.push(exit);
       },
@@ -55,11 +64,28 @@ function agentFactory(mode: "sync" | "manual" | "never") {
   return { create, flush };
 }
 
+/** Minimal Wire stand-in: stores handlers, lets tests fire "close". */
+function fakeWire() {
+  const handlers = new Map<string, () => void>();
+  return {
+    on(ev: string, cb: () => void) {
+      handlers.set(ev, cb);
+    },
+    send() {},
+    emitClose() {
+      handlers.get("close")?.();
+    },
+  } as unknown as Wire & { emitClose: () => void };
+}
+
 describe("LRU agent eviction", () => {
   let supervisor: Supervisor;
 
   afterEach(async () => {
     vi.useRealTimers();
+    // Unit teardown: drop the records so shutdown() doesn't spend its 3s
+    // deadline waiting on fakes that only die when a test flushes them.
+    supervisor.trees.clear();
     await supervisor.shutdown();
   });
 
@@ -157,6 +183,87 @@ describe("LRU agent eviction", () => {
     expect(victim.status).toBe("dormant");
     expect(victim.agent).toBeUndefined();
     expect(victim.lastExitCode).toBeNull();
+  });
+
+  it("SIGKILLs an orphaned victim even after a resume moves the record on", () => {
+    // The backstop is scoped to the agent, not the record: a resume during
+    // the death window replaces rec.agent, but the SIGTERM'd process must
+    // still be driven to SIGKILL — and the successor's record left alone.
+    vi.useFakeTimers();
+    supervisor = new Supervisor(agentFactory("never").create);
+    const recs = fillSlots();
+
+    supervisor.spawnAgent({ cwd: process.cwd(), name: "fresh" }); // evicts t0
+    const victim = recs[0]!;
+    const orphan = victim.agent as FakeAgent;
+    expect(victim.evicting).toBe(true);
+
+    // Resume-mid-eviction: a fresh agent takes over the record.
+    supervisor.spawnAgent({ cwd: process.cwd(), existing: victim });
+    expect(victim.evicting).toBe(false);
+    expect(victim.agent).not.toBe(orphan);
+
+    vi.advanceTimersByTime(3_100);
+    expect(orphan.signals).toEqual(["SIGTERM", "SIGKILL"]); // the orphan still dies
+    vi.advanceTimersByTime(3_100); // reconcile window passes…
+    // …without reaping the successor: the record stays the new agent's.
+    // (Status may read "waiting" here — the quiet-PTY fallback demotes a
+    // silent fake under fake timers — the invariant is it never went dormant.)
+    expect(victim.status).not.toBe("dormant");
+    expect(victim.agent).not.toBe(orphan);
+    expect(victim.agent?.isRunning).toBe(true);
+  });
+
+  it("awaitEviction settles when the victim dies and times out on a wedged one", async () => {
+    const fake = agentFactory("manual");
+    supervisor = new Supervisor(fake.create);
+    const recs = fillSlots();
+
+    supervisor.spawnAgent({ cwd: process.cwd(), name: "fresh" }); // evicts t0
+    const wait = supervisor.awaitEviction(recs[0]!, 2000);
+    fake.flush(); // SIGTERM lands
+    expect(await wait).toBe(true);
+    expect(recs[0]!.status).toBe("dormant");
+
+    supervisor.spawnAgent({ cwd: process.cwd(), name: "fresh2" }); // evicts t1
+    // Nothing flushes this one: the wait must give up, not hang.
+    expect(await supervisor.awaitEviction(recs[1]!, 250)).toBe(false);
+  });
+
+  it("a stale extension of a replaced agent cannot touch the record", async () => {
+    supervisor = new Supervisor(agentFactory("never").create);
+    const rec = supervisor.spawnAgent({ cwd: process.cwd(), name: "t" });
+    const bridge = new ExtBridge(supervisor, {
+      claimSession: async () => rec,
+      onSessionActivity: () => {},
+      isAttached: () => false,
+      log: () => {},
+    });
+    const hello = (treeId: string) =>
+      ({ t: "hello", role: "extension", treeId, sessionId: "s", sessionPath: "/p" }) as never;
+
+    const staleWire = fakeWire();
+    bridge.handle(staleWire, hello(rec.treeId));
+    await Promise.resolve(); // let the async claim land
+    expect(rec.extensionConnected).toBe(true);
+
+    // The agent is replaced (evict + resume); its extension is now stale.
+    supervisor.spawnAgent({ cwd: process.cwd(), existing: rec });
+    expect(rec.extensionConnected).toBe(false); // fresh process, no ext yet
+    const freshWire = fakeWire();
+    bridge.handle(freshWire, hello(rec.treeId));
+    await Promise.resolve();
+    expect(rec.extensionConnected).toBe(true);
+
+    // A late event from the dying pi must not flip the working record…
+    rec.status = "running";
+    rec.seen = true;
+    bridge.handle(staleWire, { t: "ev", type: "agent_settled" } as never);
+    expect(rec.status).toBe("running");
+    expect(rec.seen).toBe(true);
+    // …and its socket close must not strip the successor's leaf authority.
+    staleWire.emitClose();
+    expect(rec.extensionConnected).toBe(true);
   });
 
   it("daemon shutdown lands agents as quiet dormancy, not unseen work", async () => {

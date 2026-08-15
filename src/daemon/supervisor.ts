@@ -370,7 +370,10 @@ export class Supervisor extends EventEmitter<SupervisorEvents> {
     // A fresh agent is wanted here: if a dying predecessor was still being
     // evicted, its exit is stale now (guard above) and must not re-mark the
     // record — the flag belongs to the new agent, which is not evicting.
+    // Same for the extension flag: the new process has no extension yet,
+    // and a predecessor's ext must not keep claiming leaf authority.
     rec.evicting = false;
+    rec.extensionConnected = false;
     if (!options.existing) this.trees.set(rec.treeId, rec);
     rec.status = "running";
     rec.seen = true;
@@ -443,8 +446,13 @@ export class Supervisor extends EventEmitter<SupervisorEvents> {
     // Broadcast now, not at exit: clients see live=false immediately, so
     // nobody is invited to attach to a dying terminal.
     this.changed(rec);
+    // The backstop is scoped to the AGENT, not the record: even if the
+    // record moves on (a resume replaced rec.agent), the SIGTERM'd process
+    // must still die — otherwise a pi that shrugs off SIGTERM lingers as an
+    // orphan no accounting can see. Only the bookkeeping is conditional on
+    // the record still pointing at this agent.
     const backstop = setTimeout(() => {
-      if (rec.agent !== agent || !rec.evicting) return; // exited normally
+      if (!agent.isRunning) return; // exited; onExit (or the stale guard) cleaned up
       try {
         agent.kill("SIGKILL");
       } catch {
@@ -456,6 +464,20 @@ export class Supervisor extends EventEmitter<SupervisorEvents> {
       reconcile.unref();
     }, 3000);
     backstop.unref();
+  }
+
+  /**
+   * Wait until a record's in-flight eviction settles (exit processed, or the
+   * backstop reconciled it). The eviction pipeline is bounded — SIGTERM →
+   * 3s SIGKILL → 3s reconcile — so the default timeout covers the worst
+   * case. Returns false only for a process wedged beyond even that.
+   */
+  async awaitEviction(rec: TreeRecord, timeoutMs = 8000): Promise<boolean> {
+    const deadline = Date.now() + timeoutMs;
+    while (rec.evicting && Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    return !rec.evicting;
   }
 
   /** Force an evicted record dormant when its exit will never arrive. */

@@ -152,8 +152,12 @@ export class Daemon {
         // A crash before the session file ever appeared must stay visible —
         // deleting the tree would erase the only evidence anything failed.
         // An evicted/stopping agent's nonzero code is the signal we sent it,
-        // not a crash (its lastExitCode was cleared on the way down).
-        else if (code === 0 || rec.lastExitCode === null) this.removeSession(rec.sessionPath);
+        // not a crash (lastExitCode was cleared on the way down) — but a
+        // missing file is still no reason to silently delete the tree as a
+        // side effect of housekeeping: log it and leave the record be.
+        else if (code === 0) this.removeSession(rec.sessionPath);
+        else if (rec.lastExitCode === null)
+          log(`agent of ${treeId} stopped (evicted/shutdown) before writing ${rec.sessionPath}`);
         else log(`agent of ${treeId} crashed (exit ${code}) before writing ${rec.sessionPath}`);
       }
       for (const c of this.clients) {
@@ -579,8 +583,14 @@ export class Daemon {
   private async handleResume(client: ClientConn, msg: ResumeTreeMsg): Promise<void> {
     const rec = this.supervisor.trees.get(msg.treeId);
     if (!rec) return this.fail(client, msg.id, "unknown tree");
-    // An evicting agent is not "already running" — resuming mid-eviction
-    // spawns a fresh agent for the record (the dying one's exit is stale).
+    // Resuming mid-eviction must not race the dying pi: it is flushing the
+    // very session file the successor would reopen, and two writers on one
+    // JSONL is how sessions tear. The pipeline is bounded (SIGTERM → SIGKILL
+    // backstop → reconcile), so wait it out rather than failing the resume.
+    if (rec.evicting) {
+      const settled = await this.supervisor.awaitEviction(rec);
+      if (!settled) return this.fail(client, msg.id, "agent is still shutting down — try again");
+    }
     if (rec.agent?.isRunning && !rec.evicting) {
       client.wire.send({ t: "result", re: msg.id, ok: true, newTreeId: rec.treeId });
       return;
