@@ -111,6 +111,8 @@ export class Daemon {
 
   constructor() {
     this.db = openDb();
+    // LRU eviction must never take a terminal someone is attached to.
+    this.supervisor.isAttachedCheck = (treeId) => this.isAttached(treeId);
     this.semantic = new SemanticLayout({
       db: this.db,
       supervisor: this.supervisor,
@@ -180,6 +182,9 @@ export class Daemon {
         y: sane ? row.y : 0,
         mtime: row.mtime,
         status: "dormant",
+        // Attention survives restarts: a result the user never looked at is
+        // still unlooked-at after the daemon comes back.
+        seen: row.seen === 1,
         archived: row.archived === 1,
       }, row.tree_id);
     }

@@ -43,9 +43,16 @@ export function sidebarRows(trees: TreeSummary[]): SidebarRow[] {
   const recent: TreeSummary[] = [];
   const archived: TreeSummary[] = [];
   for (const t of trees) {
+    // Dormant belongs here too: an unseen result whose agent was LRU-evicted
+    // to make room is still a result waiting on the user — the process died,
+    // the notification must not.
     if (t.archived) archived.push(t);
-    else if ((t.status === "waiting" || t.status === "crashed") && !t.seen) needsInput.push(t);
-    else if (t.status === "running") working.push(t);
+    else if (
+      (t.status === "waiting" || t.status === "crashed" || t.status === "dormant") &&
+      !t.seen
+    ) {
+      needsInput.push(t);
+    } else if (t.status === "running") working.push(t);
     else recent.push(t);
   }
   const byRecency = (a: TreeSummary, b: TreeSummary) => b.mtime - a.mtime;

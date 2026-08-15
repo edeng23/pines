@@ -207,6 +207,13 @@ camera to the picked neighbor.
 }
 ```
 
+`maxLiveAgents` caps concurrent pi processes (default 12). The slots are a
+warm cache of instantly-attachable sessions — kept full on purpose. When a
+new spawn needs a slot, the least-recently-active *waiting* agent is quietly
+put to sleep (its tree stays resumable, its unseen dot survives); working
+and attached agents are never evicted, and if nothing is idle the spawn
+fails with a message naming who is busy.
+
 `embedModel` swaps the local embedding model (default MiniLM;
 `Xenova/bge-small-en-v1.5` is a known-good 384-d quality upgrade). Changing it
 re-embeds everything on the next daemon start.

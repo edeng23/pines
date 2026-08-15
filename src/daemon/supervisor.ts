@@ -42,6 +42,8 @@ export interface TreeRecord {
   lastExitCode: number | null;
   /** Fork point: entry id in the parent session this tree branched from. */
   parentEntryId: string | null;
+  /** True while this agent is being put to sleep to make room (LRU eviction). */
+  evicting: boolean;
 }
 
 export interface SupervisorEvents {
@@ -157,6 +159,12 @@ export class Supervisor extends EventEmitter<SupervisorEvents> {
   readonly trees = new Map<string, TreeRecord>();
   private activityTimer: NodeJS.Timeout | undefined;
 
+  /**
+   * Injected by the daemon: whether any client is currently attached to a
+   * tree. Eviction must never yank the terminal out from under someone.
+   */
+  isAttachedCheck: (treeId: string) => boolean = () => false;
+
   constructor(
     private readonly createAgent: (options: AgentProcOptions) => AgentProc = (options) =>
       new AgentProc(options),
@@ -171,6 +179,17 @@ export class Supervisor extends EventEmitter<SupervisorEvents> {
   liveCount(): number {
     let n = 0;
     for (const t of this.trees.values()) if (t.agent?.isRunning) n++;
+    return n;
+  }
+
+  /**
+   * Live agents that still hold a slot: an evicting one is already on its way
+   * out (SIGTERM sent), so it no longer counts against the cap — otherwise a
+   * burst of spawns would over-evict while the first victim is still dying.
+   */
+  private liveActive(): number {
+    let n = 0;
+    for (const t of this.trees.values()) if (t.agent?.isRunning && !t.evicting) n++;
     return n;
   }
 
@@ -239,6 +258,7 @@ export class Supervisor extends EventEmitter<SupervisorEvents> {
       lastOutputAt: 0,
       lastExitCode: null,
       parentEntryId: null,
+      evicting: false,
     };
   }
 
@@ -255,15 +275,25 @@ export class Supervisor extends EventEmitter<SupervisorEvents> {
     cols?: number;
     rows?: number;
   }): TreeRecord {
+    // The slot pool is a warm cache of instantly-attachable sessions: kept
+    // full on purpose, trimmed only at the moment a new spawn needs room.
+    // Pure LRU: the least-recently-active waiting agent goes to sleep —
+    // never a working agent, never a terminal someone is inside of. If
+    // nothing is idle, the spawn fails the way it always did.
     const limit = maxLiveAgents();
-    if (this.liveCount() >= limit) {
-      const idle = [...this.trees.values()]
-        .filter((t) => t.agent?.isRunning && t.status === "waiting")
-        .map((t) => t.name ?? t.treeId)
-        .slice(0, 5);
-      throw new Error(
-        `live agent limit reached (${limit}); idle candidates to kill: ${idle.join(", ") || "none"}`,
-      );
+    while (this.liveActive() >= limit) {
+      const victim = this.evictionCandidate();
+      if (!victim) {
+        const busy = [...this.trees.values()]
+          .filter((t) => t.agent?.isRunning && !t.evicting)
+          .map((t) => t.name ?? t.treeId)
+          .slice(0, 5);
+        throw new Error(
+          `live agent limit reached (${limit}) and every agent is working or attached — ` +
+            `kill one with x: ${busy.join(", ") || "none"}`,
+        );
+      }
+      this.evict(victim);
     }
 
     const rec = options.existing ?? this.newRecord();
@@ -296,14 +326,24 @@ export class Supervisor extends EventEmitter<SupervisorEvents> {
         this.emit("output", rec.treeId, data);
       },
       onExit: (code) => {
-        const clean = code === 0 && (rec.status === "waiting" || rec.status === "dormant");
-        rec.status = clean ? "completed" : code === 0 ? "completed" : "crashed";
-        rec.lastExitCode = code;
-        rec.seen = false;
+        if (rec.evicting) {
+          // Housekeeping, not news: the tree goes quietly dormant — the
+          // seen flag rides through unchanged (an unseen result keeps its
+          // attention dot), no crash verdict, and no mtime bump (eviction
+          // is not activity, so the tree keeps its age and position).
+          rec.evicting = false;
+          rec.status = "dormant";
+          rec.lastExitCode = null;
+        } else {
+          rec.status = code === 0 ? "completed" : "crashed";
+          rec.lastExitCode = code;
+          rec.seen = false;
+        }
         rec.agent?.dispose();
         rec.agent = undefined;
         rec.extensionConnected = false;
-        this.touch(rec);
+        if (rec.status === "dormant") this.changed(rec);
+        else this.touch(rec);
         this.emit("exit", rec.treeId, code);
       },
     });
@@ -339,6 +379,40 @@ export class Supervisor extends EventEmitter<SupervisorEvents> {
       rec.seen = true;
       this.touch(rec);
     }
+  }
+
+  /**
+   * Least-recently-active idle agent, pure LRU: any waiting, unattached
+   * agent qualifies, seen or not. An unseen result survives eviction — the
+   * flag rides through to the dormant record, so the attention dot outlives
+   * the process it came from.
+   */
+  private evictionCandidate(): TreeRecord | undefined {
+    let best: TreeRecord | undefined;
+    for (const t of this.trees.values()) {
+      if (!t.agent?.isRunning || t.evicting) continue;
+      if (t.status !== "waiting") continue;
+      if (this.isAttachedCheck(t.treeId)) continue;
+      if (!best || t.mtime < best.mtime) best = t;
+    }
+    return best;
+  }
+
+  /**
+   * Put an idle agent to sleep to free its slot. SIGTERM first — pi persists
+   * its session on the way down — with a SIGKILL backstop for a process that
+   * won't die; either way the tree stays resumable from its session file.
+   * The record is marked `evicting` so its exit lands as quiet dormancy
+   * instead of an attention-demanding "completed".
+   */
+  private evict(rec: TreeRecord): void {
+    const agent = rec.agent!;
+    rec.evicting = true;
+    agent.kill("SIGTERM");
+    const backstop = setTimeout(() => {
+      if (agent.isRunning) agent.kill("SIGKILL");
+    }, 3000);
+    backstop.unref();
   }
 
   killAgent(treeId: string): boolean {
