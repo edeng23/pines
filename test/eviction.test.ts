@@ -266,6 +266,45 @@ describe("LRU agent eviction", () => {
     expect(rec.extensionConnected).toBe(true);
   });
 
+  it("a hello racing its own eviction stamps the predecessor, not the successor", async () => {
+    // The claim is slow (full ingest) — slow enough that the pi saying hello
+    // can be evicted and replaced before the claim resolves. The stamp is
+    // taken synchronously at hello time, so the resolved connection must
+    // read as stale and neither mark nor later unmark the successor.
+    supervisor = new Supervisor(agentFactory("never").create);
+    const rec = supervisor.spawnAgent({ cwd: process.cwd(), name: "t" });
+    let releaseClaim!: () => void;
+    const gate = new Promise<void>((r) => (releaseClaim = r));
+    const bridge = new ExtBridge(supervisor, {
+      claimSession: async () => {
+        await gate;
+        return rec;
+      },
+      onSessionActivity: () => {},
+      isAttached: () => false,
+      log: () => {},
+    });
+    const hello = (treeId: string) =>
+      ({ t: "hello", role: "extension", treeId, sessionId: "s", sessionPath: "/p" }) as never;
+
+    const staleWire = fakeWire();
+    bridge.handle(staleWire, hello(rec.treeId)); // predecessor's hello, claim in flight
+
+    // Evict + resume while the claim is parked: the record moves on.
+    supervisor.spawnAgent({ cwd: process.cwd(), existing: rec });
+    const freshWire = fakeWire();
+    bridge.handle(freshWire, hello(rec.treeId)); // successor's hello, also parked
+
+    releaseClaim();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    // The successor's hello connected; the predecessor's resolved as stale.
+    expect(rec.extensionConnected).toBe(true);
+    staleWire.emitClose(); // and its close cannot strip the successor's flag
+    expect(rec.extensionConnected).toBe(true);
+  });
+
   it("daemon shutdown lands agents as quiet dormancy, not unseen work", async () => {
     supervisor = new Supervisor(agentFactory("sync").create);
     const recs = fillSlots(); // status waiting, seen: true (spawn acks)

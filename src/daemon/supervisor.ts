@@ -471,6 +471,11 @@ export class Supervisor extends EventEmitter<SupervisorEvents> {
    * backstop reconciled it). The eviction pipeline is bounded — SIGTERM →
    * 3s SIGKILL → 3s reconcile — so the default timeout covers the worst
    * case. Returns false only for a process wedged beyond even that.
+   *
+   * The 8s default is deliberately inside the client's 10s request timeout
+   * (daemon-client.ts `request(..., timeoutMs = 10_000)`): a worst-case wait
+   * must still answer the resume with "still shutting down" rather than
+   * letting the client time out on its own. Tune the two together.
    */
   async awaitEviction(rec: TreeRecord, timeoutMs = 8000): Promise<boolean> {
     const deadline = Date.now() + timeoutMs;

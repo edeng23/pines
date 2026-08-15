@@ -82,7 +82,19 @@ export class ExtBridge {
   }
 
   private async onHello(wire: Wire, msg: ExtensionHello): Promise<void> {
-    const conn: ExtConn = { wire, rec: undefined, agent: undefined };
+    // Stamp the agent SYNCHRONOUSLY, before the await: claimSession runs a
+    // full ingest, and a hello racing its own eviction (a slow cold-start
+    // hello is exactly what makes its pi an eviction candidate) would
+    // otherwise come back and stamp the successor's agent — making the
+    // stale connection read as current, the very case isCurrent catches.
+    // The announced treeId is the one the agent that spawned this extension
+    // carries in PINES_TREE_ID; an external pi lands on undefined, which
+    // stays "current" against a record that has no agent either.
+    const conn: ExtConn = {
+      wire,
+      rec: undefined,
+      agent: this.supervisor.trees.get(msg.treeId)?.agent,
+    };
     this.byWire.set(wire, conn);
     wire.on("close", () => {
       this.byWire.delete(wire);
@@ -99,7 +111,13 @@ export class ExtBridge {
       this.hooks.log(`extension hello for unknown tree ${msg.treeId}`);
       return;
     }
-    conn.agent = rec.agent;
+    if (!this.isCurrent(conn)) {
+      // The record moved on while the claim was in flight: this extension
+      // belongs to a dying predecessor and must not mark the successor's
+      // record connected (or touch its leaf/status) on its way out.
+      this.hooks.log(`stale extension hello for ${rec.treeId} (agent replaced mid-claim)`);
+      return;
+    }
     rec.extensionConnected = true;
     rec.sessionId = msg.sessionId;
     if (msg.leafId != null) rec.leafId = msg.leafId;
