@@ -53,7 +53,9 @@ if (process.env.PINES_SOCK && (args.includes("--ext-report") || process.env.FAKE
           ? args[args.indexOf("--session") + 1]
           : `/tmp/fake-session-${process.pid}.jsonl`),
       sessionId: "fake0000",
-      leafId: null,
+      // Real pi reports its current leaf on hello; tests exercising leaf
+      // authority (extension vs growing file) inject one here.
+      leafId: process.env.FAKE_PI_LEAF ?? null,
     });
     send({ t: "ev", type: "agent_start" });
     const settleMs = Number(process.env.FAKE_PI_SETTLE_MS ?? 600);

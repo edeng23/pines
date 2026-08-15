@@ -118,7 +118,7 @@ and a first run — all placed by the same layout the daemon uses.
 | view | keys / mouse |
 |---|---|
 | forest | `↑`/`↓` move through the sidebar list · `Enter` attach · `→` open tree view · wheel = zoom at cursor · drag = pan · click = select · double-click = open (canvas) / attach (sidebar) · `hjkl` pan · `+`/`-` zoom · `0` fit · `Tab` cycle by attention · `o` jump to most urgent · `a` attach · `n` new tree and attach · `r`/`L` rename tree · `A`/`Ctrl+X` archive/unarchive · `.` show/hide archived · `S` sidebar · `[`/`]` sidebar width · `x` kill agent · `R` relayout · `s` similar conversations · `/` search · `?` help |
-| tree | `↑`/`↓` or `j`/`k` move · `→`/`Enter` — on a tip (a node showing an agent's status): attach to that branch's agent (resume if dormant); on a `⋯` row: expand; on a `[+]` row: unfold; on any other message: grow a new branch there with its own agent and attach · `1`-`9` jump to a branch tip · `←`/`Esc` back to the forest · `b` branch menu (with/without agent) · `L` label · `r` rename tree · `/` search |
+| tree | `↑`/`↓` or `j`/`k` move · `→`/`Enter` — on a tip (a node showing an agent's status): attach to that branch's agent (resume if dormant); on a `⋯` row: expand; on a `[+]` row: unfold; on any other message: grow a new branch there with its own agent and attach (from a question: *beside* it — the question stays out) · `f` flow (one branch's conversation) ⇄ full tree · `1`-`9` jump to a branch tip · `←`/`Esc` back to the forest · `b` branch menu (with/without agent) · `L` label · `r` rename tree · `/` search |
 | attached pi | everything goes to pi, except the prefix `Ctrl+t`: `←`/`d` = back to tree · `f` = forest · `n` = next attention target · `Ctrl+t Ctrl+t` = send a literal Ctrl+t |
 
 Zooming is semantic: the sprite is the tree at every distance — maturity by
@@ -157,9 +157,21 @@ background-only launch.
 
 **Branching** (`b` on any message, or just `Enter` on a non-tip message):
 grows a new branch of the same tree, optionally with an agent on it.
-Branches never touch each other's agents, so branching while one works is
-always possible — that is the multiplexing model. (In-place leaf moves
-still exist in the daemon for pi's own navigation.)
+Where the fork lands depends on what you point at: a *reply* branches after
+its exchange; a *question* branches from just before it — the question is
+not part of the new branch, so your next message replaces it as a sibling
+(the way editing a message works in chat UIs) and the old answer can never
+read as answering the new question. The `b` menu's *re-answer* keeps the
+question and regenerates only the answer. Branches never touch each other's
+agents, so branching while one works is always possible — that is the
+multiplexing model. (In-place leaf moves still exist in the daemon for pi's
+own navigation.)
+
+**Flow view** (`f`): narrows the transcript to one branch's conversation —
+the cursor's — root to tip, nothing else. The metro map keeps the whole
+shape with that route drawn bold, and the agents panel keeps every branch:
+jumping to another agent (`1`-`9`, click) switches the flow to it. `f`
+again restores the full tree.
 
 **Search** (`/`): SQLite FTS5 over session names, every user message (abandoned
 branches included), compaction/branch summaries, and labels. `Enter` jumps to

@@ -9,7 +9,7 @@
  */
 import { clipAnsi, visibleLength } from "../ansi.js";
 import { FAINT, MUTED } from "../theme.js";
-import { exchangeEndOf, type ConvView } from "./sessionview.js";
+import { branchTargetOf, type ConvView } from "./sessionview.js";
 import type { TreeSummary } from "../../shared/types.js";
 import { statusGlyph, statusSgr } from "../forest/view.js";
 
@@ -123,12 +123,14 @@ export function renderConversation(
         if (tips.length > 1) body += ` \x1b[${MUTED}m(+${tips.length - 1})${RESET}`;
         if (isSel) body += ` \x1b[${MUTED}m(⏎ ${t.live ? "attach" : "resume"})${RESET}`;
       } else if (isSel && row.nodeId) {
-        const snapped = exchangeEndOf(view.detail, row.nodeId);
+        const target = branchTargetOf(view.detail, row.nodeId);
         const parkedHere =
-          view.parkedAt.get(snapped)?.length ?? view.parkedAt.get(row.nodeId)?.length;
+          view.parkedAt.get(target.nodeId)?.length ?? view.parkedAt.get(row.nodeId)?.length;
         body += parkedHere
           ? ` \x1b[${MUTED}m(⏎ continue from here — reuses a parked agent)${RESET}`
-          : ` \x1b[${MUTED}m(⏎ new branch + agent from here)${RESET}`;
+          : target.excludesSelected
+            ? ` \x1b[${MUTED}m(⏎ new branch before this message — it stays out)${RESET}`
+            : ` \x1b[${MUTED}m(⏎ new branch + agent from here)${RESET}`;
       }
     } else if (row.kind === "elision") {
       const sgr = isSel ? "7" : MUTED;
@@ -191,8 +193,9 @@ export function renderConversation(
   if (lay.sideW > 0) {
     const side: string[] = [];
     const n = view.tips.length;
+    const flowTag = view.flowTreeId ? ` \x1b[1m· flow${RESET}\x1b[${MUTED}m` : "";
     side.push(
-      clipAnsi(`\x1b[${MUTED}m agents on this tree — ${n}${RESET}`, lay.sideW),
+      clipAnsi(`\x1b[${MUTED}m agents on this tree — ${n}${flowTag}${RESET}`, lay.sideW),
     );
     side.push("");
     const selRow = view.rows[opts.selected]?.a;
@@ -209,6 +212,10 @@ export function renderConversation(
         height: lay.mapH,
         spinnerFrame: opts.spinnerFrame,
         cursorSkelId,
+        // Flow mode: the shown session's route reads bold on the map.
+        routeIds: view.flowPath
+          ? new Set(view.skel.filter((s) => view.flowPath!.has(s.id)).map((s) => s.id))
+          : undefined,
       });
       miniHits = mini.hits;
       for (const l of mini.lines) side.push(l);

@@ -61,9 +61,9 @@ import { FAINT, MUTED } from "./theme.js";
 import {
   aContainerOf,
   branchHeadOf,
+  branchTargetOf,
   buildConvView,
   cRowIndexOf,
-  exchangeEndOf,
   ownerOf,
   type ConvView,
 } from "./tree/sessionview.js";
@@ -121,6 +121,10 @@ type ViewMode =
       unfolded: Set<string>;
       selected: number;
       scroll: number;
+      /** Flow mode: show one session's conversation instead of the full tree. */
+      flowOnly: boolean;
+      /** Which session's flow (follows the cursor's branch); null = root. */
+      flowTreeId: string | null;
     }
   | { kind: "attached"; treeId: string };
 
@@ -462,7 +466,7 @@ export async function runApp(): Promise<void> {
       body = renderTreeBody(view);
       // The selected row explains what ⏎ does there; keep the bar terse and
       // front-load what narrow terminals would otherwise cut off.
-      hints = "⏎ attach/branch · ← forest · b branch · / search · L label · r rename · 1-9 branch · ↑↓ move ";
+      hints = "⏎ attach/branch · ← forest · f flow · b branch · / search · L label · r rename · 1-9 branch · ↑↓ move ";
     }
     if (overlay) {
       composeOverlay(body, view);
@@ -585,30 +589,46 @@ export async function runApp(): Promise<void> {
     if (mode.kind !== "tree") return;
     // No explicit focus: stay on the row under the cursor (live updates
     // rebuild the view constantly — the cursor must not jump around).
+    const m = mode; // narrowed alias: closures below must not re-widen it
     if (!focus) {
-      const cur = mode.view.rows[mode.selected]?.a;
+      const cur = m.view.rows[m.selected]?.a;
       if (cur) focus = { nodeId: cur.nodeId ?? cur.runId ?? cur.foldId ?? undefined };
     }
-    mode.view = buildConvView({
-      rootTreeId: mode.rootId,
-      detailOf: (id) => sessionDetails.get(id),
-      summaryOf,
-      childrenOf,
-      parentOf,
-      expandedRuns: mode.expandedRuns,
-      unfolded: mode.unfolded,
-      viewportH: vp().height,
-      wantDetail: fetchDetail,
-    });
-    let idx = -1;
-    if (focus?.nodeId && !focus.toLeaf) {
+    const build = () =>
+      buildConvView({
+        rootTreeId: m.rootId,
+        detailOf: (id) => sessionDetails.get(id),
+        summaryOf,
+        childrenOf,
+        parentOf,
+        expandedRuns: m.expandedRuns,
+        unfolded: m.unfolded,
+        viewportH: vp().height,
+        wantDetail: fetchDetail,
+        flowTreeId: m.flowOnly ? (m.flowTreeId ?? m.rootId) : null,
+      });
+    m.view = build();
+    const findFocus = () => {
+      if (!focus?.nodeId || focus.toLeaf) return -1;
       const id = focus.nodeId;
-      idx = mode.view.rows.findIndex(
+      return m.view.rows.findIndex(
         (r) => r.a.nodeId === id || r.a.runId === id || r.a.foldId === id,
       );
+    };
+    let idx = findFocus();
+    // Flow mode: a jump (search, panel, 1-9) may target a node on another
+    // branch — the flow follows the cursor, so switch to that node's session
+    // and rebuild once more rather than losing the jump.
+    if (idx < 0 && focus?.nodeId && m.flowOnly && m.view.detail.nodes[focus.nodeId]) {
+      const owner = ownerOf(m.view, focus.nodeId, (id) => sessionDetails.get(id));
+      if (owner && owner !== m.flowTreeId) {
+        m.flowTreeId = owner;
+        m.view = build();
+        idx = findFocus();
+      }
     }
-    if (idx < 0) idx = cRowIndexOf(mode.view, mode.view.leafId);
-    mode.selected = idx >= 0 ? idx : Math.max(0, mode.view.rows.length - 1);
+    if (idx < 0) idx = cRowIndexOf(m.view, m.view.leafId);
+    m.selected = idx >= 0 ? idx : Math.max(0, m.view.rows.length - 1);
   }
 
   function showToast(text: string): void {
@@ -637,6 +657,7 @@ export async function runApp(): Promise<void> {
       view: {
         rows: [],
         leafId: null,
+        flowTreeId: null,
         tips: [],
         atree: { rows: [], leafId: null, folded: false },
         detail: { treeId: rootId, leafId: null, rootIds: [], nodes: {} },
@@ -650,6 +671,8 @@ export async function runApp(): Promise<void> {
       unfolded: new Set(),
       selected: 0,
       scroll: 0,
+      flowOnly: false,
+      flowTreeId: null,
     };
     mode = treeMode;
     rebuildConv();
@@ -859,8 +882,9 @@ export async function runApp(): Promise<void> {
         "forest   A/ctrl+x=archive/unarchive tree  .=show/hide archived",
         "forest   s=similar conversations (semantic neighbors of the selection)",
         "tree     j/k=move  ↵/→ = attach at a ● tip (an agent lives there), or grow",
-        "tree     a new branch+agent from any other message  1-9=go to branch  b  L",
-        "tree     r=rename this tree (its forest name)",
+        "tree     a branch: after a reply — or BESIDE a question (it stays out)",
+        "tree     f=flow (one branch's conversation) ⇄ full tree  1-9=go to branch",
+        "tree     b=branch menu  L=label  r=rename this tree (its forest name)",
         `pi view  ${prefixName} ←/d=tree  ${prefixName} f=forest  ${prefixName} n=next attention`,
         `pi view  ${prefixName} ${prefixName}=send ${prefixName} to pi itself`,
         "search   / from forest or tree · ↑/↓ select · ↵ jump",
@@ -890,19 +914,28 @@ export async function runApp(): Promise<void> {
       return;
     }
     const node = sessionDetails.get(sel.treeId)?.nodes[sel.nodeId];
-    // A branch begins with YOUR next message, so it grows from the end of
-    // this exchange; re-answering (skipping the reply) is the explicit case.
-    const snapped = exchangeEndOf(mode.view.detail, sel.nodeId);
+    // A reply branches after its exchange. A user message branches from its
+    // PARENT — the question stays out of the new branch (sibling question,
+    // chat-edit style); re-answering (keep the question, fresh answer) is
+    // the explicit menu case.
+    const target = branchTargetOf(mode.view.detail, sel.nodeId);
+    const snapped = target.nodeId;
     const snapOwner =
       snapped === sel.nodeId
         ? sel.treeId
         : (ownerOf(mode.view, snapped, (id) => sessionDetails.get(id)) ?? sel.treeId);
     const canReanswer = snapped !== sel.nodeId;
-    const options = [
-      "branch + agent — your next message continues this exchange",
-      "branch only — a dormant branch after this exchange",
-      ...(canReanswer ? ["re-answer — discard nothing, ask this question again"] : []),
-    ];
+    const options = target.excludesSelected
+      ? [
+          "branch + agent — a sibling branch; this question stays out",
+          "branch only — a dormant sibling branch",
+          ...(canReanswer ? ["re-answer — keep this question, get a fresh answer"] : []),
+        ]
+      : [
+          "branch + agent — your next message continues this exchange",
+          "branch only — a dormant branch after this exchange",
+          ...(canReanswer ? ["re-answer — discard nothing, ask this question again"] : []),
+        ];
     overlay = {
       kind: "menu",
       title: `branch after: ${truncateStr(node?.excerpt || sel.nodeId, 48)}`,
@@ -1489,8 +1522,14 @@ export async function runApp(): Promise<void> {
   }
 
   /** Panel/mini click (or 1-9 by panel order): cursor to that branch tip. */
-  function gotoTipNode(nodeId: string): void {
+  function gotoTipNode(nodeId: string, treeId?: string): void {
     if (mode.kind !== "tree") return;
+    // In flow mode the flow follows the cursor: jumping to another branch's
+    // tip switches the shown conversation to that session.
+    if (mode.flowOnly) {
+      const tid = treeId ?? mode.view.tips.find((t) => t.nodeId === nodeId)?.summary.treeId;
+      if (tid) mode.flowTreeId = tid;
+    }
     rebuildConv({ nodeId });
     requestRender();
   }
@@ -1555,7 +1594,7 @@ export async function runApp(): Promise<void> {
       case "9":
         {
           const tip = mode.view.tips[Number(key) - 1];
-          if (tip) gotoTipNode(tip.nodeId);
+          if (tip) gotoTipNode(tip.nodeId, tip.summary.treeId);
         }
         return;
       case "\r":
@@ -1583,9 +1622,11 @@ export async function runApp(): Promise<void> {
             attachTip(row.tips);
             return;
           }
-          // A branch BEGINS with a user message: quick-branching from a
-          // question (or mid-run) lands after its answer, never beside it.
-          const snapped = exchangeEndOf(mode.view.detail, row.a.nodeId);
+          // Where the new branch forks from: a reply branches after its
+          // exchange; a USER message branches from its parent — the question
+          // stays out, so the next message replaces it as a sibling (the way
+          // editing a message works in chat UIs).
+          const snapped = branchTargetOf(mode.view.detail, row.a.nodeId).nodeId;
           // An unused fork already parked here? Resume it instead of
           // minting yet another session file for the same spot.
           const parked =
@@ -1610,6 +1651,27 @@ export async function runApp(): Promise<void> {
       case "r":
         void renameTreeFlow();
         return;
+      case "f": {
+        // Flow ⇄ full tree. The flow is the cursor's branch: the session of
+        // the tip under the cursor, else the session owning the cursor's node.
+        mode.flowOnly = !mode.flowOnly;
+        if (mode.flowOnly) {
+          const row = mode.view.rows[mode.selected];
+          const nodeId = row?.a.nodeId;
+          mode.flowTreeId =
+            row?.tips?.[0]?.treeId ??
+            (nodeId ? ownerOf(mode.view, nodeId, (id) => sessionDetails.get(id)) : undefined) ??
+            mode.rootId;
+        }
+        rebuildConv();
+        showToast(
+          mode.flowOnly
+            ? "flow — this branch's conversation only (f: back to the full tree)"
+            : "full tree",
+        );
+        requestRender();
+        return;
+      }
       case "S":
         ui.sidebarVisible = !ui.sidebarVisible;
         saveUiState(ui);

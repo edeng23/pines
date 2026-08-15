@@ -285,8 +285,13 @@ export class Daemon {
       else if (!rec.name || rec.name === basename(rec.cwd ?? "")) {
         rec.name = deriveTreeName(parsed) ?? rec.name;
       }
-      // A live extension is the leaf authority; files are authoritative when dormant.
-      if (!rec.extensionConnected) rec.leafId = parsed.leafId;
+      // Leaf authority: a live extension's word wins while its agent is IDLE
+      // (the user may have navigated the tree up, away from the file tail) —
+      // but the extension only reports a new leaf on settle, so while the
+      // agent is RUNNING the growing file's tail is the truth. Without this,
+      // the tip pins to the previous settle point for the whole run while
+      // the transcript shows the new messages.
+      if (!rec.extensionConnected || rec.status === "running") rec.leafId = parsed.leafId;
       if (rec.parentSessionPath && !rec.parentEntryId) {
         void this.computeForkPoint(rec, parsed);
       }
@@ -649,7 +654,11 @@ export class Daemon {
     try {
       const parsed = await parseSessionFile(rec.sessionPath);
       const detail = toTreeDetail(rec.treeId, parsed);
-      if (rec.extensionConnected && rec.leafId) detail.leafId = rec.leafId;
+      // Same rule as ingest: extension leaf wins only while idle — a running
+      // agent's leaf is wherever the file just grew to.
+      if (rec.extensionConnected && rec.leafId && rec.status !== "running") {
+        detail.leafId = rec.leafId;
+      }
       client.wire.send({ t: "result", re: msg.id, ok: true, tree: detail });
     } catch (err) {
       this.fail(client, msg.id, err);
