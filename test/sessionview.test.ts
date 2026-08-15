@@ -250,6 +250,23 @@ describe("conversation view", () => {
     expect(f.rows.map((row) => row.a.nodeId).filter(Boolean)).toContain("u2");
   });
 
+  it("flow mode survives a root whose parentId points outside the family", () => {
+    // toTreeDetail legally produces roots that keep a verbatim parentId not
+    // present in the file — the upward walk must stop at the family's edge,
+    // not crash the rebuild on a dangling ancestor.
+    const dangling = rootDetail();
+    dangling.nodes["u1"] = { ...dangling.nodes["u1"]!, parentId: "gone0000" };
+    const v = buildConvView(
+      harness({
+        detailOf: (id) => (id === "root" ? dangling : kidDetail()),
+        flowTreeId: "root",
+      }),
+    );
+    const shown = v.rows.map((r) => r.a.nodeId).filter(Boolean);
+    expect(shown).toEqual(expect.arrayContaining(["u1", "a1", "u2", "a2"]));
+    expect(v.flowPath!.has("gone0000")).toBe(false);
+  });
+
   it("streams in: missing member details are requested, view stays usable", () => {
     const wanted: string[] = [];
     const v = buildConvView(

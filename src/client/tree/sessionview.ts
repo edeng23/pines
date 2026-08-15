@@ -199,12 +199,19 @@ export function buildConvView(input: ConvViewInput): ConvView {
       flowPath = new Set<string>();
       let cur: string | null = tip.nodeId;
       for (let guard = 0; cur && guard < 100_000; guard++) {
+        // Resolve BEFORE adding: a root may legally carry a parentId that
+        // isn't in the file (toTreeDetail keeps it verbatim), and this is
+        // the codebase's first upward walk — it must stop at the family's
+        // edge, not admit a dangling id the rebuild below would crash on.
+        const n: NodeSummary | undefined = merged.detail.nodes[cur];
+        if (!n) break;
         flowPath.add(cur);
-        cur = merged.detail.nodes[cur]?.parentId ?? null;
+        cur = n.parentId ?? null;
       }
       const nodes: Record<string, NodeSummary> = {};
       for (const id of flowPath) {
-        const n = merged.detail.nodes[id]!;
+        const n = merged.detail.nodes[id];
+        if (!n) continue;
         nodes[id] = { ...n, children: n.children.filter((c) => flowPath!.has(c)) };
       }
       renderDetail = {

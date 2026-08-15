@@ -938,7 +938,8 @@ export async function runApp(): Promise<void> {
         ];
     overlay = {
       kind: "menu",
-      title: `branch after: ${truncateStr(node?.excerpt || sel.nodeId, 48)}`,
+      // A question's branch lands BESIDE it, not after — say so up front.
+      title: `branch ${target.excludesSelected ? "beside" : "after"}: ${truncateStr(node?.excerpt || sel.nodeId, 48)}`,
       options,
       selected: 0,
       onPick: (idx) => {
