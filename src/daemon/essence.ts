@@ -163,6 +163,58 @@ const META_WEIGHT = 1.0;
 const TOOLS_WEIGHT = 0.6;
 
 /**
+ * The pooling window over CACHED chunk rows: newest user messages plus the
+ * first, newest summaries, and the digests. The cache deliberately keeps
+ * more user rows than the window (so a scrolled-out chunk isn't churned);
+ * everything that CONSUMES the cache — pooling and chunk-set similarity —
+ * must select through this one function or the two drift apart.
+ * `rows` must be in pos order (chunksForTree's order).
+ */
+export function selectChunkWindow<T extends { kind: string; chunk_key: string }>(rows: T[]): T[] {
+  const users = rows.filter((r) => r.kind === "user");
+  const userWindow = new Set(
+    users
+      .slice(-MAX_USER_CHUNKS)
+      .concat(users.length > 0 ? [users[0]!] : [])
+      .map((r) => r.chunk_key),
+  );
+  const summaries = rows.filter((r) => r.kind === "summary");
+  const summaryWindow = new Set(summaries.slice(-MAX_SUMMARY_CHUNKS).map((r) => r.chunk_key));
+  return rows.filter(
+    (r) =>
+      r.kind === "meta" ||
+      r.kind === "tools" ||
+      (r.kind === "user" && userWindow.has(r.chunk_key)) ||
+      (r.kind === "summary" && summaryWindow.has(r.chunk_key)),
+  );
+}
+
+/**
+ * One notion of chunk importance, shared by pooling and chunk-set similarity:
+ * users decay by recency with a floor for the opener, summaries decay from
+ * 0.9, meta counts fully, the tools digest 0.6.
+ */
+export function weighChunks<T extends { kind: string; pos: number }>(
+  chunks: T[],
+): Array<{ chunk: T; weight: number }> {
+  const users = chunks.filter((c) => c.kind === "user").sort((a, b) => a.pos - b.pos);
+  const summaries = chunks.filter((c) => c.kind === "summary").sort((a, b) => a.pos - b.pos);
+  const weights = new Map<T, number>();
+  users.forEach((c, i) => {
+    const recency = Math.pow(USER_DECAY, users.length - 1 - i);
+    weights.set(c, Math.max(recency, i === 0 ? FIRST_USER_FLOOR : USER_FLOOR));
+  });
+  summaries.forEach((c, j) => {
+    weights.set(c, SUMMARY_TOP * Math.pow(SUMMARY_DECAY, summaries.length - 1 - j));
+  });
+  for (const c of chunks) {
+    if (c.kind === "meta") weights.set(c, META_WEIGHT);
+    else if (c.kind === "tools") weights.set(c, TOOLS_WEIGHT);
+  }
+  return chunks.filter((c) => weights.has(c)).map((chunk) => ({ chunk, weight: weights.get(chunk)! }));
+}
+
+/**
  * Recency-weighted spherical mean of unit chunk vectors → unit tree vector.
  * Returns null when there is nothing to pool (or the sum degenerates).
  */
@@ -172,25 +224,9 @@ export function poolChunks(
   if (chunks.length === 0) return null;
   const dim = chunks[0]!.vec.length;
   const sum = new Float32Array(dim);
-
-  const users = chunks.filter((c) => c.kind === "user").sort((a, b) => a.pos - b.pos);
-  const summaries = chunks.filter((c) => c.kind === "summary").sort((a, b) => a.pos - b.pos);
-
-  const add = (vec: Float32Array, w: number) => {
-    for (let i = 0; i < dim; i++) sum[i]! += vec[i]! * w;
-  };
-  users.forEach((c, i) => {
-    const recency = Math.pow(USER_DECAY, users.length - 1 - i);
-    add(c.vec, Math.max(recency, i === 0 ? FIRST_USER_FLOOR : USER_FLOOR));
-  });
-  summaries.forEach((c, j) => {
-    add(c.vec, SUMMARY_TOP * Math.pow(SUMMARY_DECAY, summaries.length - 1 - j));
-  });
-  for (const c of chunks) {
-    if (c.kind === "meta") add(c.vec, META_WEIGHT);
-    else if (c.kind === "tools") add(c.vec, TOOLS_WEIGHT);
+  for (const { chunk, weight } of weighChunks(chunks)) {
+    for (let i = 0; i < dim; i++) sum[i]! += chunk.vec[i]! * weight;
   }
-
   let norm = 0;
   for (let i = 0; i < dim; i++) norm += sum[i]! * sum[i]!;
   norm = Math.sqrt(norm);

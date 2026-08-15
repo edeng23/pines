@@ -75,8 +75,10 @@ function deriveTreeName(parsed: ParsedSession): string | null {
 import { relax } from "../layout/relax.js";
 import { branchInPlace, branchToNewTree, setNodeLabel, type BranchDeps } from "./branch.js";
 import { SemanticLayout } from "./semantic.js";
-import { searchFts, similarTrees } from "../store/db.js";
-import type { SearchHit, SimilarHit, TreeStatus } from "../shared/types.js";
+import { searchFts } from "../store/db.js";
+import { rankSimilar } from "./chunksim.js";
+import { essenceChunks } from "./essence.js";
+import type { SearchHit, TreeStatus } from "../shared/types.js";
 
 /** How long a version-rejected connection stays open to accept `shutdown`. */
 const REJECTED_GRACE_MS = 2000;
@@ -818,11 +820,35 @@ export class Daemon {
   }
 
   protected async handleSimilar(client: ClientConn, msg: SimilarMsg): Promise<void> {
-    // A tree with no embedding yet is not an error — the model may still be
-    // warming (or unavailable); the client renders the empty list accordingly.
-    const rows = similarTrees(this.db, msg.treeId, msg.k ?? 8);
-    const similar: SimilarHit[] = rows.map((r) => ({ treeId: r.tree_id, score: r.score }));
+    // Two-stage: pooled cosine shortlists (cheap, whole forest), chunk-set
+    // matching re-ranks and explains. A tree with no embedding yet is not an
+    // error — the model may still be warming (or unavailable); the client
+    // renders the empty list accordingly.
+    const similar = await rankSimilar(this.db, msg.treeId, {
+      k: msg.k ?? 8,
+      resolveText: (treeId, chunkKey) => this.chunkText(treeId, chunkKey),
+    });
     client.wire.send({ t: "result", re: msg.id, ok: true, similar });
+  }
+
+  /**
+   * Display excerpt for a chunk key, resolved from the session file (through
+   * the parse cache) rather than stored — text that cannot go stale. Keys are
+   * entry ids (user messages, summaries) or content-hashed digest keys, and
+   * essenceChunks rebuilds exactly the texts those keys were minted from.
+   */
+  private async chunkText(treeId: string, chunkKey: string): Promise<string | undefined> {
+    const rec = this.supervisor.trees.get(treeId);
+    if (!rec?.sessionPath || !existsSync(rec.sessionPath)) return undefined;
+    try {
+      const parsed = await parseSessionFile(rec.sessionPath);
+      const chunk = essenceChunks(rec.name ?? parsed.name, parsed).find((c) => c.key === chunkKey);
+      if (!chunk) return undefined;
+      const text = chunk.text.replace(/\s+/g, " ").trim();
+      return text.length > 90 ? text.slice(0, 89) + "…" : text;
+    } catch {
+      return undefined;
+    }
   }
 
   protected async handleSetLabel(client: ClientConn, msg: SetLabelMsg): Promise<void> {

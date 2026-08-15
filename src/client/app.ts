@@ -12,7 +12,7 @@ import { homedir } from "node:os";
 import { DaemonClient } from "./daemon-client.js";
 import { pinesHome } from "../shared/paths.js";
 import { startBoot } from "./boot.js";
-import type { SearchHit, TreeDetail, TreeSummary, Camera } from "../shared/types.js";
+import type { SearchHit, SimilarEvidence, TreeDetail, TreeSummary, Camera } from "../shared/types.js";
 import {
   InputRouter,
   MOUSE_ENABLE,
@@ -136,6 +136,8 @@ type Overlay =
       options: string[];
       selected: number;
       onPick: (index: number) => void;
+      /** Per-option detail lines, rendered under the list for the selection. */
+      detail?: (string[] | undefined)[];
     }
   | {
       kind: "input";
@@ -528,6 +530,13 @@ export async function runApp(): Promise<void> {
         const cursor = i === (overlay as { selected: number }).selected ? "\x1b[7m" : "";
         lines.push(bar(` ${cursor} ${opt} \x1b[0m`));
       });
+      // The selected option's receipts (e.g. WHY a similar hit scored what
+      // it did) live under the list, so the list itself stays scannable.
+      const detail = overlay.detail?.[overlay.selected];
+      if (detail?.length) {
+        lines.push(`${pad}├${"─".repeat(inner)}┤`);
+        for (const d of detail) lines.push(bar(` ${d}`));
+      }
     }
     lines.push(`${pad}\x1b[0m╰${"─".repeat(inner)}╯`);
     const top = Math.max(1, Math.floor((view.height - lines.length) / 3));
@@ -719,15 +728,17 @@ export async function runApp(): Promise<void> {
       return;
     }
     // Hits are session files; the user thinks in conversations. Fold each
-    // hit to its family root, keep the best score per family, and drop the
-    // anchor's own family — a fork of the same conversation is not a find.
+    // hit to its family root, keep the best-scoring member per family (the
+    // list arrives ranked, so first wins — its evidence rides along), and
+    // drop the anchor's own family — a fork of the same conversation is not
+    // a find.
     const seen = new Set<string>([familyRootId(treeId)]);
-    const hits: { rootId: string; score: number }[] = [];
+    const hits: { rootId: string; score: number; evidence?: SimilarEvidence[] }[] = [];
     for (const h of res.similar ?? []) {
       const rootId = familyRootId(h.treeId);
       if (seen.has(rootId)) continue;
       seen.add(rootId);
-      hits.push({ rootId, score: h.score });
+      hits.push({ rootId, score: h.score, evidence: h.evidence });
     }
     if (hits.length === 0) {
       showToast("no similar conversations yet (semantic layout may still be warming)");
@@ -739,10 +750,25 @@ export async function runApp(): Promise<void> {
       const cwd = t?.cwd ? t.cwd.split("/").pop() ?? "" : "";
       return `${scoreBar(h.score)} \x1b[36m${name}\x1b[0m \x1b[${MUTED}m${cwd}\x1b[0m`;
     });
+    // The receipts: each hit's top matching chunk pairs, shown for the
+    // selected row. ⚙ marks a match coming from tool activity (same files)
+    // rather than conversation topic — worth knowing which kind of similar.
+    const detail = hits.map((h) =>
+      h.evidence?.map((e) => {
+        const tools = e.kindA === "tools" && e.kindB === "tools";
+        const mark = tools ? "⚙ " : "";
+        const room = 30;
+        return (
+          `\x1b[${MUTED}m${mark}“${truncateStr(e.a, room)}” ↔ “${truncateStr(e.b, room)}”` +
+          ` · ${e.score.toFixed(2)}\x1b[0m`
+        );
+      }),
+    );
     overlay = {
       kind: "menu",
       title: `similar to ${anchor ? treeTitle(anchor).title : treeId}`,
       options,
+      detail,
       selected: 0,
       onPick: (i) => {
         const hit = hits[i];

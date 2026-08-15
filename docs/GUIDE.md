@@ -202,9 +202,16 @@ trees never jump**; `R` refits. Offline or before the model warms, a
 deterministic lexical layout (cwd clusters on a spiral, recency rings) applies
 — the forest always loads instantly.
 
-**Similar trees** (`s`): ranks the forest by cosine similarity to the selected
-tree (same embeddings, brute force — instant at forest scale) and jumps the
-camera to the picked neighbor.
+**Similar trees** (`s`): ranks the forest against the selected tree in two
+stages — a cheap pooled-cosine shortlist over everything, then an exact
+re-rank that *matches the two trees' chunks* (each message finds its best
+counterpart on the other side, recency-weighted). Matching chunk sets, not
+blended vectors, means a conversation that covers two topics ranks well
+against both — and every score comes with receipts: the selected hit shows
+the top matching message pairs, with `⚙` marking matches that come from
+tool activity (same files) rather than topic. Picking a neighbor jumps the
+camera to it. Note the map is the *approximate* view (pooled vectors,
+projected to 2-D for stability); the `s` list is the honest one.
 
 ## Configuration
 
