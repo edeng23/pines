@@ -163,8 +163,13 @@ export async function rankSimilar(
     const sim = anchor.length > 0 ? chunkSimilarity(anchor, theirs) : null;
     if (sim) scored.push({ treeId: cand.tree_id, score: sim.score, matches: sim.matches });
     else if (cand.score >= MIN_SCORE) {
-      // No chunk sets to match (cold model, chunkless tree): the pooled
-      // score is still an honest cosine — keep it, without receipts.
+      // DEFENSIVE, not an expected path: repool only writes trees.embedding
+      // from chunk rows, so a shortlisted tree should always have a scorable
+      // window — this fires only for stores mutated outside that invariant
+      // (hand-edited DB, partial prune). The pooled score is still an honest
+      // cosine — keep it, without receipts, rather than going blank. If this
+      // ever becomes a live path, mind the two score scales sharing one
+      // ranking: Chamfer runs hotter than pooled cosine.
       scored.push({ treeId: cand.tree_id, score: cand.score, matches: [] });
     }
   }
