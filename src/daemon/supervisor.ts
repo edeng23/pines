@@ -186,6 +186,12 @@ export class Supervisor extends EventEmitter<SupervisorEvents> {
    * Live agents that still hold a slot: an evicting one is already on its way
    * out (SIGTERM sent), so it no longer counts against the cap — otherwise a
    * burst of spawns would over-evict while the first victim is still dying.
+   *
+   * The deliberate flip side: during the death window (up to the 3s SIGKILL
+   * backstop) the number of pi *processes* can exceed the cap — one dying
+   * victim per in-flight spawn, and SIGTERM is exactly when pi flushes its
+   * session. That transient overshoot is the price of spawns never blocking
+   * on a victim's exit; the cap bounds slots, not corpses.
    */
   private liveActive(): number {
     let n = 0;
@@ -207,7 +213,9 @@ export class Supervisor extends EventEmitter<SupervisorEvents> {
       nodeCount: rec.nodeCount,
       x: rec.x,
       y: rec.y,
-      live: rec.agent?.isRunning ?? false,
+      // An evicting agent is on its way out and not attachable: clients see
+      // the tree as no longer live the moment eviction starts.
+      live: (rec.agent?.isRunning ?? false) && !rec.evicting,
       archived: rec.archived,
       mtime: rec.mtime,
       lastExitCode: rec.lastExitCode,
@@ -306,6 +314,7 @@ export class Supervisor extends EventEmitter<SupervisorEvents> {
     if (options.name) args.push("--name", options.name);
     if (options.prompt) args.push(options.prompt);
 
+    let self: AgentProc | undefined;
     const agent = this.createAgent({
       treeId: rec.treeId,
       cwd: options.cwd,
@@ -318,6 +327,7 @@ export class Supervisor extends EventEmitter<SupervisorEvents> {
         PINES_TREE_ID: rec.treeId,
       },
       onData: (data) => {
+        if (rec.agent !== self) return; // replaced agent still draining its pty
         rec.lastOutputAt = Date.now();
         if (!rec.extensionConnected && rec.status !== "running") {
           rec.status = "running";
@@ -326,6 +336,13 @@ export class Supervisor extends EventEmitter<SupervisorEvents> {
         this.emit("output", rec.treeId, data);
       },
       onExit: (code) => {
+        // A stale exit: the record moved on without us — replaced by a
+        // resume during eviction, or force-reconciled by the eviction
+        // backstop. Free the terminal state and touch nothing else.
+        if (rec.agent !== self) {
+          self?.dispose();
+          return;
+        }
         if (rec.evicting) {
           // Housekeeping, not news: the tree goes quietly dormant — the
           // seen flag rides through unchanged (an unseen result keeps its
@@ -347,8 +364,13 @@ export class Supervisor extends EventEmitter<SupervisorEvents> {
         this.emit("exit", rec.treeId, code);
       },
     });
+    self = agent;
 
     rec.agent = agent;
+    // A fresh agent is wanted here: if a dying predecessor was still being
+    // evicted, its exit is stale now (guard above) and must not re-mark the
+    // record — the flag belongs to the new agent, which is not evicting.
+    rec.evicting = false;
     if (!options.existing) this.trees.set(rec.treeId, rec);
     rec.status = "running";
     rec.seen = true;
@@ -404,15 +426,48 @@ export class Supervisor extends EventEmitter<SupervisorEvents> {
    * won't die; either way the tree stays resumable from its session file.
    * The record is marked `evicting` so its exit lands as quiet dormancy
    * instead of an attention-demanding "completed".
+   *
+   * Every path out of here reconciles the record: a kill that throws (the
+   * process was already gone) and a pty that never reports its exit both
+   * end in reapEvicted, never in a permanently-`evicting` leaked slot.
    */
   private evict(rec: TreeRecord): void {
     const agent = rec.agent!;
     rec.evicting = true;
-    agent.kill("SIGTERM");
+    try {
+      agent.kill("SIGTERM");
+    } catch {
+      this.reapEvicted(rec, agent);
+      return;
+    }
+    // Broadcast now, not at exit: clients see live=false immediately, so
+    // nobody is invited to attach to a dying terminal.
+    this.changed(rec);
     const backstop = setTimeout(() => {
-      if (agent.isRunning) agent.kill("SIGKILL");
+      if (rec.agent !== agent || !rec.evicting) return; // exited normally
+      try {
+        agent.kill("SIGKILL");
+      } catch {
+        /* already gone */
+      }
+      const reconcile = setTimeout(() => {
+        if (rec.agent === agent && rec.evicting) this.reapEvicted(rec, agent);
+      }, 3000);
+      reconcile.unref();
     }, 3000);
     backstop.unref();
+  }
+
+  /** Force an evicted record dormant when its exit will never arrive. */
+  private reapEvicted(rec: TreeRecord, agent: AgentProc): void {
+    rec.evicting = false;
+    rec.status = "dormant";
+    rec.lastExitCode = null;
+    agent.dispose();
+    rec.agent = undefined;
+    rec.extensionConnected = false;
+    this.changed(rec);
+    this.emit("exit", rec.treeId, null);
   }
 
   killAgent(treeId: string): boolean {
@@ -452,6 +507,11 @@ export class Supervisor extends EventEmitter<SupervisorEvents> {
   async shutdown(): Promise<void> {
     if (this.activityTimer) clearInterval(this.activityTimer);
     const live = [...this.trees.values()].filter((t) => t.agent?.isRunning);
+    // Daemon shutdown is housekeeping, not news — same rule as eviction.
+    // Without the flag these exits would land as unseen "completed" work,
+    // and (now that `seen` survives restarts) every tree that was live at
+    // shutdown would come back demanding attention it already got.
+    for (const t of live) t.evicting = true;
     for (const t of live) t.agent!.kill("SIGTERM");
     const deadline = Date.now() + 3000;
     while (Date.now() < deadline && live.some((t) => t.agent?.isRunning)) {

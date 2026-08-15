@@ -21,7 +21,11 @@ export function statusSgr(t: { status: string; seen: boolean }): string {
     case "completed":
       return "32"; // green, undimmed — dim colors sink below visibility on dark themes
     default:
-      return MUTED; // dormant
+      // Dormant — but an unseen dormant tree is a result whose agent was
+      // evicted (or the daemon restarted) before the user looked: the
+      // notification outlives the process. Deep teal, a shade darker than a
+      // live waiting agent's, so "wants eyes" reads without lying "live".
+      return t.seen ? MUTED : "38;5;37";
   }
 }
 
@@ -36,6 +40,6 @@ export function statusGlyph(t: { status: string; seen: boolean }, spinnerFrame: 
     case "completed":
       return "✓"; // distinguishes from waiting ○ now both are full green
     default:
-      return "·";
+      return t.seen ? "·" : "●"; // dormant keeps its dot while a result is unread
   }
 }

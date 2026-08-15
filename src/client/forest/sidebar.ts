@@ -31,6 +31,17 @@ export interface SidebarRow {
 }
 
 /**
+ * One predicate for "this tree wants the user's eyes", shared by the
+ * needs-input group and the header's ● counter so they can never disagree.
+ * Dormant belongs here: an unseen result whose agent was LRU-evicted (or
+ * died with the daemon) is still a result waiting on the user — the process
+ * died, the notification must not.
+ */
+export function needsAttention(t: TreeSummary): boolean {
+  return !t.seen && (t.status === "waiting" || t.status === "crashed" || t.status === "dormant");
+}
+
+/**
  * Group and order the forest for the list: trees needing attention first
  * (waiting-unseen and crashed-unseen), then live working trees, then
  * everything else — each group ordered by last interaction, newest first.
@@ -43,16 +54,9 @@ export function sidebarRows(trees: TreeSummary[]): SidebarRow[] {
   const recent: TreeSummary[] = [];
   const archived: TreeSummary[] = [];
   for (const t of trees) {
-    // Dormant belongs here too: an unseen result whose agent was LRU-evicted
-    // to make room is still a result waiting on the user — the process died,
-    // the notification must not.
     if (t.archived) archived.push(t);
-    else if (
-      (t.status === "waiting" || t.status === "crashed" || t.status === "dormant") &&
-      !t.seen
-    ) {
-      needsInput.push(t);
-    } else if (t.status === "running") working.push(t);
+    else if (needsAttention(t)) needsInput.push(t);
+    else if (t.status === "running") working.push(t);
     else recent.push(t);
   }
   const byRecency = (a: TreeSummary, b: TreeSummary) => b.mtime - a.mtime;
@@ -137,7 +141,7 @@ export function renderSidebar(input: SidebarRenderInput): {
     let unseen = 0;
     let running = 0;
     for (const t of trees.values()) {
-      if (t.status === "waiting" && !t.seen) unseen++;
+      if (needsAttention(t)) unseen++;
       if (t.status === "running") running++;
     }
     const counts = [

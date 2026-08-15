@@ -151,7 +151,9 @@ export class Daemon {
         if (existsSync(rec.sessionPath)) void this.ingest(rec.sessionPath);
         // A crash before the session file ever appeared must stay visible —
         // deleting the tree would erase the only evidence anything failed.
-        else if (code === 0) this.removeSession(rec.sessionPath);
+        // An evicted/stopping agent's nonzero code is the signal we sent it,
+        // not a crash (its lastExitCode was cleared on the way down).
+        else if (code === 0 || rec.lastExitCode === null) this.removeSession(rec.sessionPath);
         else log(`agent of ${treeId} crashed (exit ${code}) before writing ${rec.sessionPath}`);
       }
       for (const c of this.clients) {
@@ -577,7 +579,9 @@ export class Daemon {
   private async handleResume(client: ClientConn, msg: ResumeTreeMsg): Promise<void> {
     const rec = this.supervisor.trees.get(msg.treeId);
     if (!rec) return this.fail(client, msg.id, "unknown tree");
-    if (rec.agent?.isRunning) {
+    // An evicting agent is not "already running" — resuming mid-eviction
+    // spawns a fresh agent for the record (the dying one's exit is stale).
+    if (rec.agent?.isRunning && !rec.evicting) {
       client.wire.send({ t: "result", re: msg.id, ok: true, newTreeId: rec.treeId });
       return;
     }
@@ -605,7 +609,9 @@ export class Daemon {
 
   private async handleAttach(client: ClientConn, msg: AttachMsg): Promise<void> {
     const rec = this.supervisor.trees.get(msg.treeId);
-    if (!rec?.agent?.isRunning) {
+    // Evicting counts as not-live: handing out a snapshot of a dying
+    // terminal reports success and then the screen just stops.
+    if (!rec?.agent?.isRunning || rec.evicting) {
       const why =
         rec?.lastExitCode != null && rec.lastExitCode !== 0
           ? `agent crashed (exit ${rec.lastExitCode}) — see ${daemonLogPath()}`
