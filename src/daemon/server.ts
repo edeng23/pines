@@ -111,6 +111,8 @@ export class Daemon {
 
   constructor() {
     this.db = openDb();
+    // LRU eviction must never take a terminal someone is attached to.
+    this.supervisor.isAttachedCheck = (treeId) => this.isAttached(treeId);
     this.semantic = new SemanticLayout({
       db: this.db,
       supervisor: this.supervisor,
@@ -149,7 +151,13 @@ export class Daemon {
         if (existsSync(rec.sessionPath)) void this.ingest(rec.sessionPath);
         // A crash before the session file ever appeared must stay visible —
         // deleting the tree would erase the only evidence anything failed.
+        // An evicted/stopping agent's nonzero code is the signal we sent it,
+        // not a crash (lastExitCode was cleared on the way down) — but a
+        // missing file is still no reason to silently delete the tree as a
+        // side effect of housekeeping: log it and leave the record be.
         else if (code === 0) this.removeSession(rec.sessionPath);
+        else if (rec.lastExitCode === null)
+          log(`agent of ${treeId} stopped (evicted/shutdown) before writing ${rec.sessionPath}`);
         else log(`agent of ${treeId} crashed (exit ${code}) before writing ${rec.sessionPath}`);
       }
       for (const c of this.clients) {
@@ -180,6 +188,9 @@ export class Daemon {
         y: sane ? row.y : 0,
         mtime: row.mtime,
         status: "dormant",
+        // Attention survives restarts: a result the user never looked at is
+        // still unlooked-at after the daemon comes back.
+        seen: row.seen === 1,
         archived: row.archived === 1,
       }, row.tree_id);
     }
@@ -572,7 +583,15 @@ export class Daemon {
   private async handleResume(client: ClientConn, msg: ResumeTreeMsg): Promise<void> {
     const rec = this.supervisor.trees.get(msg.treeId);
     if (!rec) return this.fail(client, msg.id, "unknown tree");
-    if (rec.agent?.isRunning) {
+    // Resuming mid-eviction must not race the dying pi: it is flushing the
+    // very session file the successor would reopen, and two writers on one
+    // JSONL is how sessions tear. The pipeline is bounded (SIGTERM → SIGKILL
+    // backstop → reconcile), so wait it out rather than failing the resume.
+    if (rec.evicting) {
+      const settled = await this.supervisor.awaitEviction(rec);
+      if (!settled) return this.fail(client, msg.id, "agent is still shutting down — try again");
+    }
+    if (rec.agent?.isRunning && !rec.evicting) {
       client.wire.send({ t: "result", re: msg.id, ok: true, newTreeId: rec.treeId });
       return;
     }
@@ -600,7 +619,9 @@ export class Daemon {
 
   private async handleAttach(client: ClientConn, msg: AttachMsg): Promise<void> {
     const rec = this.supervisor.trees.get(msg.treeId);
-    if (!rec?.agent?.isRunning) {
+    // Evicting counts as not-live: handing out a snapshot of a dying
+    // terminal reports success and then the screen just stops.
+    if (!rec?.agent?.isRunning || rec.evicting) {
       const why =
         rec?.lastExitCode != null && rec.lastExitCode !== 0
           ? `agent crashed (exit ${rec.lastExitCode}) — see ${daemonLogPath()}`

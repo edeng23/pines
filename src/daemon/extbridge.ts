@@ -12,10 +12,19 @@ import type {
   ExtensionToDaemon,
 } from "../shared/protocol.js";
 import type { Supervisor, TreeRecord } from "./supervisor.js";
+import type { AgentProc } from "./agents.js";
 
 interface ExtConn {
   wire: Wire;
   rec: TreeRecord | undefined;
+  /**
+   * The agent this extension rides inside, stamped at claim time. A record
+   * can outlive its agent (LRU eviction + resume spawns a successor), and a
+   * stale extension must not keep writing to a record that moved on — its
+   * socket close and late events are dropped once `rec.agent` is no longer
+   * the agent it belongs to.
+   */
+  agent: AgentProc | undefined;
 }
 
 export class ExtBridge {
@@ -67,12 +76,29 @@ export class ExtBridge {
     return false;
   };
 
+  /** Does this connection still speak for its record's current agent? */
+  private isCurrent(conn: ExtConn): boolean {
+    return conn.rec !== undefined && conn.rec.agent === conn.agent;
+  }
+
   private async onHello(wire: Wire, msg: ExtensionHello): Promise<void> {
-    const conn: ExtConn = { wire, rec: undefined };
+    // Stamp the agent SYNCHRONOUSLY, before the await: claimSession runs a
+    // full ingest, and a hello racing its own eviction (a slow cold-start
+    // hello is exactly what makes its pi an eviction candidate) would
+    // otherwise come back and stamp the successor's agent — making the
+    // stale connection read as current, the very case isCurrent catches.
+    // The announced treeId is the one the agent that spawned this extension
+    // carries in PINES_TREE_ID; an external pi lands on undefined, which
+    // stays "current" against a record that has no agent either.
+    const conn: ExtConn = {
+      wire,
+      rec: undefined,
+      agent: this.supervisor.trees.get(msg.treeId)?.agent,
+    };
     this.byWire.set(wire, conn);
     wire.on("close", () => {
       this.byWire.delete(wire);
-      if (conn.rec) conn.rec.extensionConnected = false;
+      if (conn.rec && this.isCurrent(conn)) conn.rec.extensionConnected = false;
     });
 
     try {
@@ -83,6 +109,13 @@ export class ExtBridge {
     const rec = conn.rec;
     if (!rec) {
       this.hooks.log(`extension hello for unknown tree ${msg.treeId}`);
+      return;
+    }
+    if (!this.isCurrent(conn)) {
+      // The record moved on while the claim was in flight: this extension
+      // belongs to a dying predecessor and must not mark the successor's
+      // record connected (or touch its leaf/status) on its way out.
+      this.hooks.log(`stale extension hello for ${rec.treeId} (agent replaced mid-claim)`);
       return;
     }
     rec.extensionConnected = true;
@@ -97,7 +130,10 @@ export class ExtBridge {
 
   private onEvent(conn: ExtConn, ev: ExtensionEvent): void {
     const rec = conn.rec;
-    if (!rec) return;
+    // A dying pi's extension may still fire (a late agent_settled during the
+    // SIGTERM window) after a successor took the record — dropping it is the
+    // difference between a quiet handover and a phantom needs-input dot.
+    if (!rec || !this.isCurrent(conn)) return;
     switch (ev.type) {
       case "agent_start":
         this.supervisor.setStatus(rec, "running");
@@ -134,7 +170,7 @@ export class ExtBridge {
 
   hasExtension(treeId: string): boolean {
     for (const conn of this.byWire.values()) {
-      if (conn.rec?.treeId === treeId) return true;
+      if (conn.rec?.treeId === treeId && this.isCurrent(conn)) return true;
     }
     return false;
   }
@@ -147,7 +183,7 @@ export class ExtBridge {
   ): Promise<{ ok: boolean; err?: string }> {
     let target: ExtConn | undefined;
     for (const conn of this.byWire.values()) {
-      if (conn.rec?.treeId === treeId) target = conn;
+      if (conn.rec?.treeId === treeId && this.isCurrent(conn)) target = conn;
     }
     if (!target) return Promise.resolve({ ok: false, err: "no extension connected" });
     const id = `c_${randomUUID().slice(0, 8)}`;

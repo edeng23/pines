@@ -39,6 +39,14 @@ describe("sidebar", () => {
     expect(rows.filter((r) => r.kind === "header").map((r) => r.label)).toEqual(["recent"]);
   });
 
+  it("keeps an unseen dormant tree (evicted agent) in the needs-input group", () => {
+    // The process died to free a slot; the notification must not die with it.
+    const rows = sidebarRows([tree("a", "dormant", true, 100), tree("ev", "dormant", false, 50)]);
+    const headers = rows.filter((r) => r.kind === "header").map((r) => r.label);
+    expect(headers).toEqual(["needs input", "recent"]);
+    expect(sidebarOrder(rows)[0]).toBe("ev");
+  });
+
   it("puts archived trees in their own bottom group regardless of status", () => {
     const archived = { ...tree("z", "waiting", false, 999), archived: true };
     const rows = sidebarRows([...trees, archived]);
@@ -107,7 +115,7 @@ describe("sidebar", () => {
     expect(plain[0]).toContain("▲"); // the mascot's crown…
     expect(plain[0]).toContain("█▀▄ ▀█▀"); // …beside the block wordmark
     expect(plain[3]).toContain("v0.1.0 · pi 0.82.0");
-    expect(plain[4]).toContain("●2"); // b + d wait unseen
+    expect(plain[4]).toContain("●3"); // b + d wait unseen, e crashed unseen
     expect(plain[4]).toContain("◐1"); // c runs
     expect(plain[4]).toContain("6 trees");
     for (let i = 0; i < h; i++) expect(out.lineToTree[i]).toBeNull();
