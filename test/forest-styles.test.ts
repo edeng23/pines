@@ -229,6 +229,21 @@ describe("pine generator", () => {
     expect(widths.some((w, i) => i > 0 && w < widths[i - 1]!)).toBe(true);
   });
 
+  it("an elder is never smaller than a younger tree at the same spacing", () => {
+    // The trunk is a bonus row under the crown, never traded against it —
+    // paying a crown row for bark once made an old tree draw SMALLER than
+    // a young one at mid zoom.
+    const maxW = (s: { rows: string[] }) => Math.max(...s.rows.map((r) => r.trim().length));
+    for (const sp of [7, 9, 12, 15, 20]) {
+      for (const id of IDS) {
+        const young = pineSprite(40, id, sp);
+        const elder = pineSprite(400, id, sp);
+        expect(elder.rows.length).toBeGreaterThanOrEqual(young.rows.length);
+        expect(maxW(elder)).toBeGreaterThanOrEqual(maxW(young));
+      }
+    }
+  });
+
   it("an elder is an elder at every zoom: the bark shows even when cramped", () => {
     // t_b2 is trunk-eligible (id-dealt); crowding shrinks its crown but the
     // trunk stays — a small tree standing on bark reads as old growth.

@@ -172,22 +172,32 @@ export function pineSprite(nodeCount: number, treeId: string, spacing: number): 
   // shrinks the crown, the bark still shows, and a small tree standing on a
   // trunk is how a packed map says "old growth". (Most, not all, elders
   // grow one — the id decides, like everything else about a tree's look.)
+  //
+  // The trunk is a BONUS row under the crown, never traded against it: an
+  // elder must never draw a smaller crown than a younger tree at the same
+  // spacing, and paying a crown row for bark caused exactly that.
   const trunkEligible = earned >= 8 && seed % 3 !== 0;
-  const total = Math.min(earned + (trunkEligible ? 1 : 0), room);
-  const showTrunk = trunkEligible && total >= 4;
-  const h = showTrunk ? total - 1 : Math.min(earned, room);
+  const h = Math.min(earned, room);
+  const showTrunk = trunkEligible && h >= 3;
   if (h <= 1) return { trunk: 0, rows: ["▲"], tones: ["1"] };
 
+  // Tier NOTCHES: narrow rows that break the crown into stacked tiers. A
+  // notch pauses the widening — the next row resumes the progression — so
+  // the base width depends only on height, and a tree that grows its first
+  // tier never comes out narrower than a younger, unbroken crown (resetting
+  // the width did exactly that). Never on the last row: the skirt is the
+  // silhouette. The eldest crowns earn a second notch — three tiers.
   const widths: number[] = [1];
   let w = 1;
-  const breakAt = h >= 6 ? 3 + (seed % 2) : -1;
+  const notch1 = h >= 6 ? 3 + (seed % 2) : -1;
+  const notch2 = h >= 9 ? Math.min(notch1 + 4, h - 2) : -1;
   for (let r = 1; r < h; r++) {
-    if (r === breakAt) {
-      w = Math.max(3, w - 4); // the crown resets: a new tier begins
+    if (r === notch1 || r === notch2) {
+      widths.push(Math.max(3, w - 4));
     } else {
       w = Math.min(w + 2, MAX_CROWN_W);
+      widths.push(w);
     }
-    widths.push(w);
   }
 
   const maxW = Math.max(...widths);
