@@ -27,9 +27,8 @@ import { DEFAULT_EMBED_MODEL, loadConfig } from "../shared/config.js";
 import {
   essenceChunks,
   poolChunks,
+  selectChunkWindow,
   validChunkKeys,
-  MAX_SUMMARY_CHUNKS,
-  MAX_USER_CHUNKS,
   USER_CHUNK_CACHE,
   type EssenceChunk,
 } from "./essence.js";
@@ -248,25 +247,8 @@ export class SemanticLayout {
    */
   private repool(treeId: string): void {
     const rows = chunksForTree(this.deps.db, treeId);
-    const users = rows.filter((r) => r.kind === "user");
-    const userWindow = new Set(
-      users
-        .slice(-MAX_USER_CHUNKS)
-        .concat(users.length > 0 ? [users[0]!] : [])
-        .map((r) => r.chunk_key),
-    );
-    const summaries = rows.filter((r) => r.kind === "summary");
-    const summaryWindow = new Set(summaries.slice(-MAX_SUMMARY_CHUNKS).map((r) => r.chunk_key));
     const pooled = poolChunks(
-      rows
-        .filter(
-          (r) =>
-            r.kind === "meta" ||
-            r.kind === "tools" ||
-            (r.kind === "user" && userWindow.has(r.chunk_key)) ||
-            (r.kind === "summary" && summaryWindow.has(r.chunk_key)),
-        )
-        .map((r) => ({ kind: r.kind, pos: r.pos, vec: vectorOf(r.embedding) })),
+      selectChunkWindow(rows).map((r) => ({ kind: r.kind, pos: r.pos, vec: vectorOf(r.embedding) })),
     );
     if (!pooled) {
       this.settleBackfill(treeId);

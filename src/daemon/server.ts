@@ -75,8 +75,10 @@ function deriveTreeName(parsed: ParsedSession): string | null {
 import { relax } from "../layout/relax.js";
 import { branchInPlace, branchToNewTree, setNodeLabel, type BranchDeps } from "./branch.js";
 import { SemanticLayout } from "./semantic.js";
-import { searchFts, similarTrees } from "../store/db.js";
-import type { SearchHit, SimilarHit, TreeStatus } from "../shared/types.js";
+import { searchFts } from "../store/db.js";
+import { rankSimilar } from "./chunksim.js";
+import { essenceChunks } from "./essence.js";
+import type { SearchHit, TreeStatus } from "../shared/types.js";
 
 /** How long a version-rejected connection stays open to accept `shutdown`. */
 const REJECTED_GRACE_MS = 2000;
@@ -818,11 +820,51 @@ export class Daemon {
   }
 
   protected async handleSimilar(client: ClientConn, msg: SimilarMsg): Promise<void> {
-    // A tree with no embedding yet is not an error — the model may still be
-    // warming (or unavailable); the client renders the empty list accordingly.
-    const rows = similarTrees(this.db, msg.treeId, msg.k ?? 8);
-    const similar: SimilarHit[] = rows.map((r) => ({ treeId: r.tree_id, score: r.score }));
+    // Two-stage: pooled cosine shortlists (cheap, whole forest), chunk-set
+    // matching re-ranks and explains. A tree with no embedding yet is not an
+    // error — the model may still be warming (or unavailable); the client
+    // renders the empty list accordingly.
+    //
+    // Excerpt lookups memoize PER REQUEST: one essenceChunks pass per tree,
+    // where per-lookup resolution would rebuild the identical chunk list
+    // dozens of times per keypress (half of them for the anchor alone).
+    const memo = new Map<string, Promise<Map<string, string> | undefined>>();
+    const textsOf = (treeId: string): Promise<Map<string, string> | undefined> => {
+      let p = memo.get(treeId);
+      if (!p) {
+        p = this.chunkTexts(treeId);
+        memo.set(treeId, p);
+      }
+      return p;
+    };
+    const similar = await rankSimilar(this.db, msg.treeId, {
+      k: msg.k ?? 8,
+      resolveText: async (treeId, chunkKey) => (await textsOf(treeId))?.get(chunkKey),
+    });
     client.wire.send({ t: "result", re: msg.id, ok: true, similar });
+  }
+
+  /**
+   * Display excerpts for a tree's chunks, resolved from the session file
+   * (through the parse cache) rather than stored — text that cannot go
+   * stale. Keys are entry ids (user messages, summaries) or content-hashed
+   * digest keys, and essenceChunks rebuilds exactly the texts those keys
+   * were minted from.
+   */
+  private async chunkTexts(treeId: string): Promise<Map<string, string> | undefined> {
+    const rec = this.supervisor.trees.get(treeId);
+    if (!rec?.sessionPath || !existsSync(rec.sessionPath)) return undefined;
+    try {
+      const parsed = await parseSessionFile(rec.sessionPath);
+      const texts = new Map<string, string>();
+      for (const chunk of essenceChunks(rec.name ?? parsed.name, parsed)) {
+        const text = chunk.text.replace(/\s+/g, " ").trim();
+        texts.set(chunk.key, text.length > 90 ? text.slice(0, 89) + "…" : text);
+      }
+      return texts;
+    } catch {
+      return undefined;
+    }
   }
 
   protected async handleSetLabel(client: ClientConn, msg: SetLabelMsg): Promise<void> {

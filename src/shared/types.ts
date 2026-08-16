@@ -65,11 +65,28 @@ export interface SearchHit {
   rank: number;
 }
 
-/** One neighbor from a "similar trees" query (cosine over pooled embeddings). */
+/** One matching chunk pair backing a similarity score — the receipt. */
+export interface SimilarEvidence {
+  /** Excerpt from the anchor tree (pre-clipped daemon-side). */
+  a: string;
+  /** Excerpt from the neighbor. */
+  b: string;
+  kindA: string;
+  kindB: string;
+  /** Cosine of this pair. */
+  score: number;
+}
+
+/**
+ * One neighbor from a "similar trees" query. The score is a chunk-matched
+ * (late-interaction) similarity when chunk vectors exist, else the pooled
+ * cosine; both live in [-1, 1] with a ~0.25 floor. Evidence, when present,
+ * lists the top matching chunk pairs behind the score.
+ */
 export interface SimilarHit {
   treeId: string;
-  /** Cosine similarity in [-1, 1]; in practice the floor is ~0.25. */
   score: number;
+  evidence?: SimilarEvidence[];
 }
 
 export interface Camera {
