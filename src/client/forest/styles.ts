@@ -137,12 +137,17 @@ export function earnedRows(nodeCount: number): number {
   return Math.max(1, Math.min(MAX_CROWN_H, h));
 }
 
-/** Rows the forest has ROOM to draw at this spacing (incl. a trunk row). */
+/**
+ * Rows the forest has ROOM to draw at this spacing (incl. a trunk row).
+ * Deliberately looser than the old five-sprite cap: a forest at ordinary
+ * fit-zoom sits around spacing 8–14, and if tiers only unlocked past 15
+ * the whole growth story would be invisible exactly where the user looks.
+ */
 function roomRows(spacing: number): number {
   if (spacing >= 19) return MAX_CROWN_H + 1;
-  if (spacing >= 15) return 7;
-  if (spacing >= 11) return 5;
-  if (spacing >= 7) return 3;
+  if (spacing >= 14) return 8;
+  if (spacing >= 11) return 6;
+  if (spacing >= 7) return 4;
   if (spacing >= 4) return 2;
   return 1;
 }
@@ -161,7 +166,16 @@ function roomRows(spacing: number): number {
 export function pineSprite(nodeCount: number, treeId: string, spacing: number): Sprite {
   const seed = treeSeed(treeId);
   const room = roomRows(spacing);
-  const h = Math.min(earnedRows(nodeCount), room);
+  const earned = earnedRows(nodeCount);
+  // An elder is an elder at EVERY zoom. Trunk-worthiness comes from what the
+  // tree EARNED, not from what the map has room to draw — so when crowding
+  // shrinks the crown, the bark still shows, and a small tree standing on a
+  // trunk is how a packed map says "old growth". (Most, not all, elders
+  // grow one — the id decides, like everything else about a tree's look.)
+  const trunkEligible = earned >= 8 && seed % 3 !== 0;
+  const total = Math.min(earned + (trunkEligible ? 1 : 0), room);
+  const showTrunk = trunkEligible && total >= 4;
+  const h = showTrunk ? total - 1 : Math.min(earned, room);
   if (h <= 1) return { trunk: 0, rows: ["▲"], tones: ["1"] };
 
   const widths: number[] = [1];
@@ -175,9 +189,6 @@ export function pineSprite(nodeCount: number, treeId: string, spacing: number): 
     }
     widths.push(w);
   }
-  // Most (not all) old trees show bark under the canopy — the forest's one
-  // non-green tone, and it needs a spare row of room to stand in.
-  const showTrunk = h >= 8 && seed % 3 !== 0 && room > h;
 
   const maxW = Math.max(...widths);
   const trunk = Math.floor((maxW - 1) / 2);

@@ -217,8 +217,26 @@ describe("pine generator", () => {
 
   it("a packed forest keeps its trees small; zoom hands the tiers back", () => {
     expect(pineSprite(400, "t_a1", 5).rows.length).toBeLessThanOrEqual(2);
-    expect(pineSprite(400, "t_a1", 9).rows.length).toBeLessThanOrEqual(3);
+    expect(pineSprite(400, "t_a1", 9).rows.length).toBeLessThanOrEqual(4);
     expect(pineSprite(400, "t_a1", 30).rows.length).toBeGreaterThanOrEqual(8);
+  });
+
+  it("tiers appear at ordinary fit-zoom, not only zoomed all the way in", () => {
+    // The original cap gated the whole growth story behind spacing >= 15,
+    // which made a 150-message tree look exactly like it always had at the
+    // zoom people actually use. Spacing ~12 must already show the break.
+    const widths = pineSprite(150, "t_a1", 12).rows.map((r) => r.trim().length);
+    expect(widths.some((w, i) => i > 0 && w < widths[i - 1]!)).toBe(true);
+  });
+
+  it("an elder is an elder at every zoom: the bark shows even when cramped", () => {
+    // t_b2 is trunk-eligible (id-dealt); crowding shrinks its crown but the
+    // trunk stays — a small tree standing on bark reads as old growth.
+    const cramped = pineSprite(400, "t_b2", 8);
+    expect(cramped.rows.at(-1)!.trim()).toBe("▐█▌");
+    // A young tree at the same spacing shows no bark anywhere.
+    const young = pineSprite(20, "t_b2", 8);
+    expect(young.rows.every((r) => !r.includes("▐"))).toBe(true);
   });
 });
 

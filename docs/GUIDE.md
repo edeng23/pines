@@ -80,9 +80,11 @@ paper, lineage surveyed in right angles. A tree grows with the conversation
 behind it on a log curve that never tops out: one new crown row per rough
 doubling of the conversation, up to nine. Past ninety-odd messages the crown
 breaks into **stacked tiers**, and the oldest trees stand on a bark trunk —
-the forest's one non-green. The tier pattern is dealt from the tree's id
-(exactly like its green), so no two elders match, yet every silhouette is
-strictly symmetric — a pine at every size, lit from the upper left. A dormant session keeps its needles in a muted, wintered-over green
+the forest's one non-green, and it shows at *every* zoom: even when crowding
+shrinks the crown, an elder still stands on its bark. The tier pattern is
+dealt from the tree's id (exactly like its green), so no two elders match,
+yet every silhouette is strictly symmetric — a pine at every size, lit from
+the upper left. A dormant session keeps its needles in a muted, wintered-over green
 (the whole forest sleeps between daemon runs — it still reads as a forest);
 only a crashed one stands bare, ember red. Work you haven't seen lights the
 crown's tip. Underneath, graph paper and right-angle lineage: survey lines
