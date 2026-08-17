@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { Canvas } from "../src/client/forest/canvas.js";
 import { renderForest } from "../src/client/forest/view.js";
+import { earnedRows, pineSprite } from "../src/client/forest/styles.js";
 import { LabelPlacer } from "../src/client/forest/style.js";
 import { loadUiState } from "../src/client/uistate.js";
 import type { TreeSummary } from "../src/shared/types.js";
@@ -162,6 +163,95 @@ describe("crowding", () => {
     ];
     const { text } = render(3, pair, "lower");
     expect(text).toContain("lower-tree-name"); // selected: always intact
+  });
+});
+
+describe("pine generator", () => {
+  const SIZES = [1, 5, 15, 40, 90, 200, 420];
+  const IDS = ["t_a1", "t_b2", "t_c3", "t_d4"];
+
+  it("is deterministic: same inputs, same sprite, nothing ever flickers", () => {
+    for (const n of SIZES) {
+      expect(pineSprite(n, "t_a1", 30)).toEqual(pineSprite(n, "t_a1", 30));
+    }
+  });
+
+  it("every row of every tree is a strictly symmetric pine row", () => {
+    for (const n of SIZES) {
+      for (const id of IDS) {
+        const s = pineSprite(n, id, 30);
+        for (const row of s.rows) {
+          const lead = row.length - row.trimStart().length;
+          const trail = row.length - row.trimEnd().length;
+          expect(lead).toBe(trail); // bilateral, centered on the trunk
+          expect(row.trim()).toMatch(/^(▲|▐█▌|▟█*▙)$/u); // tip, bark, or crown row
+        }
+      }
+    }
+  });
+
+  it("growth never tops out: more conversation is never a smaller tree", () => {
+    for (const id of IDS) {
+      let prev = 0;
+      for (const n of SIZES) {
+        const rows = pineSprite(n, id, 99).rows.length;
+        expect(rows).toBeGreaterThanOrEqual(prev);
+        prev = rows;
+      }
+    }
+    // The old ladder froze at 100; the log curve keeps climbing past it.
+    const earned = [6, 12, 24, 48, 96, 190, 380].map(earnedRows);
+    for (let i = 1; i < earned.length; i++) expect(earned[i]!).toBeGreaterThan(earned[i - 1]!);
+  });
+
+  it("old crowns break into stacked tiers; the tree's id deals the character", () => {
+    const widths = (id: string) =>
+      pineSprite(400, id, 30).rows.map((r) => r.trim().length);
+    // Somewhere in an elder's crown the width RESETS — the second tier.
+    const hasBreak = (ws: number[]) => ws.some((w, i) => i > 0 && w < ws[i - 1]! && ws[i - 1]! > 3);
+    for (const id of IDS) expect(hasBreak(widths(id))).toBe(true);
+    // And ids produce distinct elders (break position and/or trunk differ).
+    const distinct = new Set(IDS.map((id) => widths(id).join(",")));
+    expect(distinct.size).toBeGreaterThan(1);
+  });
+
+  it("a packed forest keeps its trees small; zoom hands the tiers back", () => {
+    expect(pineSprite(400, "t_a1", 5).rows.length).toBeLessThanOrEqual(2);
+    expect(pineSprite(400, "t_a1", 9).rows.length).toBeLessThanOrEqual(4);
+    expect(pineSprite(400, "t_a1", 30).rows.length).toBeGreaterThanOrEqual(8);
+  });
+
+  it("tiers appear at ordinary fit-zoom, not only zoomed all the way in", () => {
+    // The original cap gated the whole growth story behind spacing >= 15,
+    // which made a 150-message tree look exactly like it always had at the
+    // zoom people actually use. Spacing ~12 must already show the break.
+    const widths = pineSprite(150, "t_a1", 12).rows.map((r) => r.trim().length);
+    expect(widths.some((w, i) => i > 0 && w < widths[i - 1]!)).toBe(true);
+  });
+
+  it("an elder is never smaller than a younger tree at the same spacing", () => {
+    // The trunk is a bonus row under the crown, never traded against it —
+    // paying a crown row for bark once made an old tree draw SMALLER than
+    // a young one at mid zoom.
+    const maxW = (s: { rows: string[] }) => Math.max(...s.rows.map((r) => r.trim().length));
+    for (const sp of [7, 9, 12, 15, 20]) {
+      for (const id of IDS) {
+        const young = pineSprite(40, id, sp);
+        const elder = pineSprite(400, id, sp);
+        expect(elder.rows.length).toBeGreaterThanOrEqual(young.rows.length);
+        expect(maxW(elder)).toBeGreaterThanOrEqual(maxW(young));
+      }
+    }
+  });
+
+  it("an elder is an elder at every zoom: the bark shows even when cramped", () => {
+    // t_b2 is trunk-eligible (id-dealt); crowding shrinks its crown but the
+    // trunk stays — a small tree standing on bark reads as old growth.
+    const cramped = pineSprite(400, "t_b2", 8);
+    expect(cramped.rows.at(-1)!.trim()).toBe("▐█▌");
+    // A young tree at the same spacing shows no bark anywhere.
+    const young = pineSprite(20, "t_b2", 8);
+    expect(young.rows.every((r) => !r.includes("▐"))).toBe(true);
   });
 });
 

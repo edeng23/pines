@@ -45,43 +45,17 @@ function label(canvas: Canvas, c: DrawCtx, x: number, y: number, text: string, s
  * from the tree's own cell, which carries the status glyph and acts as the
  * base of the trunk.
  *
- * Every sprite carries a tone map: `0` is lit, `1` is body, `2` is shadow.
- * The light comes from the upper left on every tree — a lit tip and edge, a
- * darker right flank — which is what turns a flat green triangle into
- * something with a sunny side. `trunk` is the column of the bitmap that
+ * Every sprite carries a tone map: `0` is lit, `1` is body, `2` is shadow,
+ * `3` is bark. The light comes from the upper left on every tree — a lit tip
+ * and edge, a darker right flank — which is what turns a flat green triangle
+ * into something with a sunny side. `trunk` is the column of the bitmap that
  * stands on the tree's own cell, so sizes of different widths line up.
  */
-interface Sprite {
+export interface Sprite {
   rows: string[];
   tones: string[];
   trunk: number;
 }
-
-/**
- * Needled — every living conversation, dormant or not.
- *
- * Even the smallest is a whole tree: a forest of one-cell triangles reads as
- * punctuation, not as a wood. Size still varies — it is how the map shows you
- * which conversations went long — but the silhouette is always a pine.
- */
-const PINE_XXL: Sprite = {
-  trunk: 4,
-  rows: ["    ▲    ", "   ▟█▙   ", "  ▟███▙  ", " ▟█████▙ ", "▟███████▙"],
-  tones: ["    0    ", "   012   ", "  01112  ", " 0111112 ", "011111112"],
-};
-const PINE_XL: Sprite = {
-  trunk: 3,
-  rows: ["   ▲   ", "  ▟█▙  ", " ▟███▙ ", "▟█████▙"],
-  tones: ["   0   ", "  012  ", " 01112 ", "0111112"],
-};
-const PINE_L: Sprite = {
-  trunk: 2,
-  rows: ["  ▲  ", " ▟█▙ ", "▟███▙"],
-  tones: ["  0  ", " 012 ", "01112"],
-};
-const PINE_M: Sprite = { trunk: 1, rows: [" ▲ ", "▟█▙"], tones: [" 0 ", "012"] };
-/** Only for a forest with no room left at all. */
-const PINE_S: Sprite = { trunk: 0, rows: ["▲"], tones: ["1"] };
 
 /** Bare: only a crashed session loses its needles — burnt wood, unmistakable. */
 const BARE_XL: Sprite = {
@@ -97,22 +71,20 @@ const BARE_L: Sprite = {
   tones: ["0 1 0", " 010 "],
 };
 
-const PINES: Sprite[] = [PINE_S, PINE_M, PINE_L, PINE_XL, PINE_XXL];
-const BARES: Sprite[] = [BARE_S, BARE_M, BARE_L, BARE_XL, BARE_XL];
-
-/** Lit / body / shadow, as a 256-color triple. */
-type Palette = [string, string, string];
+/** Lit / body / shadow / bark, as a 256-color quadruple. */
+type Palette = [string, string, string, string];
 
 /**
  * Foliage comes in a few close greens, dealt out per tree: a real wood is
  * many near-greens, not one, and the variation is what makes a hillside of
  * pines read as alive instead of tiled. The pick is a hash of the tree id,
  * so a tree keeps its color for life and never flickers between frames.
+ * Bark is the forest's one non-green: it only ever shows on old growth.
  */
 const FOLIAGE: Palette[] = [
-  ["38;5;114", "38;5;71", "38;5;29"], // fresh pine
-  ["38;5;150", "38;5;108", "38;5;65"], // dusty sage
-  ["38;5;113", "38;5;70", "38;5;28"], // sunlit lime
+  ["38;5;114", "38;5;71", "38;5;29", "38;5;137"], // fresh pine
+  ["38;5;150", "38;5;108", "38;5;65", "38;5;137"], // dusty sage
+  ["38;5;113", "38;5;70", "38;5;28", "38;5;137"], // sunlit lime
 ];
 
 /**
@@ -120,20 +92,24 @@ const FOLIAGE: Palette[] = [
  * a whole forest goes dormant on every daemon restart, and it must still read
  * as a forest. The green just goes muted, wintered-over.
  */
-const WINTER_TONES: Palette = ["38;5;108", "38;5;65", "38;5;59"];
+const WINTER_TONES: Palette = ["38;5;108", "38;5;65", "38;5;59", "38;5;95"];
 
 /** A crashed session stands as burnt wood — ember red, unmistakable. */
-const EMBER_TONES: Palette = ["38;5;203", "38;5;167", "38;5;124"];
+const EMBER_TONES: Palette = ["38;5;203", "38;5;167", "38;5;124", "38;5;52"];
+
+function treeSeed(treeId: string): number {
+  let h = 2166136261;
+  for (let i = 0; i < treeId.length; i++) {
+    h ^= treeId.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return h >>> 0;
+}
 
 function paletteOf(t: TreeSummary): Palette {
   if (t.status === "crashed") return EMBER_TONES;
   if (t.status === "dormant") return WINTER_TONES;
-  let h = 2166136261;
-  for (let i = 0; i < t.treeId.length; i++) {
-    h ^= t.treeId.charCodeAt(i);
-    h = Math.imul(h, 16777619);
-  }
-  return FOLIAGE[(h >>> 0) % FOLIAGE.length]!;
+  return FOLIAGE[treeSeed(t.treeId) % FOLIAGE.length]!;
 }
 
 /** Bare is reserved for the one state that means the tree burned. */
@@ -142,20 +118,120 @@ function isBare(t: TreeSummary): boolean {
 }
 
 /**
- * How big a tree grew, and how big this forest can afford to draw it.
+ * The widest crown a tree ever grows, in cells. Wide enough that no legal
+ * (height, tier-break) plan ever repeats a row width — a repeated width
+ * reads as a flat-sided column, not a pine skirt.
+ */
+const MAX_CROWN_W = 13;
+/** The tallest crown, in rows (a trunk row can stand under it). */
+const MAX_CROWN_H = 9;
+
+/**
+ * Crown rows the conversation has EARNED: logarithmic, one new row per
+ * ~1.8× growth. Doubling is the unit of progress — early life changes fast,
+ * old age changes slowly but never stops (a 400-message tree still out-grows
+ * a 200-message one, where the old ladder froze everything at 100).
+ */
+export function earnedRows(nodeCount: number): number {
+  const h = 1 + Math.floor(Math.log(Math.max(nodeCount, 3) / 3) / Math.log(1.8));
+  return Math.max(1, Math.min(MAX_CROWN_H, h));
+}
+
+/**
+ * Rows the forest has ROOM to draw at this spacing (incl. a trunk row).
+ * Deliberately looser than the old five-sprite cap: a forest at ordinary
+ * fit-zoom sits around spacing 8–14, and if tiers only unlocked past 15
+ * the whole growth story would be invisible exactly where the user looks.
+ */
+function roomRows(spacing: number): number {
+  if (spacing >= 19) return MAX_CROWN_H + 1;
+  if (spacing >= 14) return 8;
+  if (spacing >= 11) return 6;
+  if (spacing >= 7) return 4;
+  if (spacing >= 4) return 2;
+  return 1;
+}
+
+/**
+ * Grow a pine. One deterministic silhouette from (size, id, room):
+ *
+ * Strictly symmetric — bilateral, centered on its trunk — and built from
+ * stacked triangle tiers, the classic conifer form. The crown widens row by
+ * row; from six rows it BREAKS into a second tier (the width resets and
+ * climbs again), and old trees stand on a visible bark trunk. The tree's id
+ * chooses only symmetric character — an early or late tier break, a shown
+ * or hidden trunk — never a lean, so every tree is unmistakably a tree and
+ * no two elders match. Same inputs, same sprite: nothing ever flickers.
+ */
+export function pineSprite(nodeCount: number, treeId: string, spacing: number): Sprite {
+  const seed = treeSeed(treeId);
+  const room = roomRows(spacing);
+  const earned = earnedRows(nodeCount);
+  // An elder is an elder at EVERY zoom. Trunk-worthiness comes from what the
+  // tree EARNED, not from what the map has room to draw — so when crowding
+  // shrinks the crown, the bark still shows, and a small tree standing on a
+  // trunk is how a packed map says "old growth". (Most, not all, elders
+  // grow one — the id decides, like everything else about a tree's look.)
+  //
+  // The trunk is a BONUS row under the crown, never traded against it: an
+  // elder must never draw a smaller crown than a younger tree at the same
+  // spacing, and paying a crown row for bark caused exactly that.
+  const trunkEligible = earned >= 8 && seed % 3 !== 0;
+  const h = Math.min(earned, room);
+  const showTrunk = trunkEligible && h >= 3;
+  if (h <= 1) return { trunk: 0, rows: ["▲"], tones: ["1"] };
+
+  // Tier NOTCHES: narrow rows that break the crown into stacked tiers. A
+  // notch pauses the widening — the next row resumes the progression — so
+  // the base width depends only on height, and a tree that grows its first
+  // tier never comes out narrower than a younger, unbroken crown (resetting
+  // the width did exactly that). Never on the last row: the skirt is the
+  // silhouette. The eldest crowns earn a second notch — three tiers.
+  const widths: number[] = [1];
+  let w = 1;
+  const notch1 = h >= 6 ? 3 + (seed % 2) : -1;
+  const notch2 = h >= 9 ? Math.min(notch1 + 4, h - 2) : -1;
+  for (let r = 1; r < h; r++) {
+    if (r === notch1 || r === notch2) {
+      widths.push(Math.max(3, w - 4));
+    } else {
+      w = Math.min(w + 2, MAX_CROWN_W);
+      widths.push(w);
+    }
+  }
+
+  const maxW = Math.max(...widths);
+  const trunk = Math.floor((maxW - 1) / 2);
+  const rows: string[] = [];
+  const tones: string[] = [];
+  const centered = (body: string, tone: string): void => {
+    const pad = " ".repeat((maxW - body.length) / 2);
+    rows.push(pad + body + pad);
+    tones.push(pad + tone + pad);
+  };
+  for (const width of widths) {
+    if (width === 1) centered("▲", "0");
+    else centered("▟" + "█".repeat(width - 2) + "▙", "0" + "1".repeat(width - 2) + "2");
+  }
+  if (showTrunk) centered("▐█▌", "333");
+  return { trunk, rows, tones };
+}
+
+/**
+ * How big this forest can afford to draw a tree.
  *
  * Conversation length sets the size — it is the only structural signal the
  * forest has at this zoom. Then the room between neighbors caps it: a packed
  * forest keeps its trees small rather than growing them into each other, and
- * zooming in lets them fill out again. The floor is a whole little pine; the
- * bare single glyph is reserved for forests with no room at all. The
- * five-row old-growth tier is earned twice over — a genuinely long session
- * in a genuinely open forest.
+ * zooming in lets them fill out again. Crashed trees stand as bare burnt
+ * wood, sized to the same room.
  */
 function spriteFor(t: TreeSummary, bare: boolean, spacing: number): Sprite {
-  const grown = t.nodeCount >= 100 ? 4 : t.nodeCount >= 35 ? 3 : t.nodeCount >= 12 ? 2 : 1;
-  const room = spacing >= 15 ? 4 : spacing >= 11 ? 3 : spacing >= 7 ? 2 : spacing >= 4 ? 1 : 0;
-  return (bare ? BARES : PINES)[Math.min(grown, room)]!;
+  if (bare) {
+    const h = Math.min(earnedRows(t.nodeCount), roomRows(spacing));
+    return h <= 1 ? BARE_S : h <= 2 ? BARE_M : h <= 4 ? BARE_L : BARE_XL;
+  }
+  return pineSprite(t.nodeCount, t.treeId, spacing);
 }
 
 /** Cell box a sprite fills, standing on (and excluding) its base row. */
@@ -188,7 +264,7 @@ function drawSprite(
     const tones = sprite.tones[r]!;
     for (let i = 0; i < row.length; i++) {
       if (row[i] === " ") continue;
-      const tone = palette[Number(tones[i]) as 0 | 1 | 2] ?? palette[1];
+      const tone = palette[Number(tones[i]) as 0 | 1 | 2 | 3] ?? palette[1];
       canvas.set(box.x + i, box.y + r, row[i]!, bold ? `1;${tone}` : tone, pickId);
     }
   }
