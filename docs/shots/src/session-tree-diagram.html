@@ -1,0 +1,117 @@
+<!doctype html><meta charset="utf-8"><title>pi session jsonl</title>
+<style>
+  :root {
+    --bg:#0d1117; --panel:#11161d; --line:#232c38;
+    --fg:#d5dae1; --muted:#7d8590; --dim:#5b6878;
+    --id:#00d7d7; --parent:#7ee787; --leaf:#f2cc60; --str:#aab5c3;
+  }
+  html { height:100%; }
+  body {
+    margin:0; min-height:100vh; box-sizing:border-box;
+    display:flex; align-items:center; justify-content:center; padding-top:110px;
+    background:var(--bg);
+    font-family:"DejaVu Sans","Liberation Sans",sans-serif;
+  }
+  .wrap { display:inline-block; }
+  h2 {
+    margin:0 0 12px; font-size:16px; font-weight:600; letter-spacing:.01em;
+    color:var(--muted);
+  }
+  .panel {
+    background:var(--panel); border:1px solid var(--line);
+    border-radius:9px; padding:18px 22px;
+  }
+  pre {
+    margin:0; font-family:"DejaVu Sans Mono","Liberation Mono",monospace;
+    font-size:14.5px; line-height:25px; color:var(--str); white-space:pre;
+  }
+  .k { color:var(--muted); }
+  .id { color:var(--id); font-weight:700; }
+  .pid { color:var(--parent); font-weight:700; }
+  .nul { color:var(--dim); }
+  .lf { color:var(--leaf); font-weight:700; }
+  .t { color:var(--fg); }
+  .cap { margin-top:12px; font-size:14px; color:var(--dim); line-height:1.55; }
+  .cap b { font-weight:600; }
+  .join {
+    margin:26px 0 22px; text-align:center;
+    font-size:14px; color:var(--dim); letter-spacing:.04em;
+  }
+  .join span { color:var(--parent); }
+</style>
+<div class="wrap">
+
+  <h2>one session file, appended to as the conversation runs</h2>
+  <div class="panel"><pre><span class="k">{</span>"type":"session", "version":3, "cwd":"/proj/pines"<span class="k">}</span>
+<span class="k">{</span>"type":"message", "id":<span class="id">"…1d"</span>, "parentId":<span class="nul">null</span>,  … "user"      <span class="t">"profile the frame time"</span><span class="k">}</span>
+<span class="k">{</span>"type":"message", "id":<span class="id">"…1e"</span>, "parentId":<span class="pid">"…1d"</span>, … "assistant" <span class="t">"redraw runs 40× a second"</span><span class="k">}</span>
+<span class="k">{</span>"type":"message", "id":<span class="id">"…1f"</span>, "parentId":<span class="pid">"…1e"</span>, … "user"      <span class="t">"memoize the layout pass"</span><span class="k">}</span>
+<span class="k">{</span>"type":"message", "id":<span class="id">"…20"</span>, "parentId":<span class="pid">"…1f"</span>, … "assistant" <span class="t">"cached by session mtime"</span><span class="k">}</span>
+<span class="k">{</span>"type":"message", "id":<span class="id">"…21"</span>, "parentId":<span class="pid">"…1e"</span>, … "user"      <span class="t">"try a dirty-rect pass"</span><span class="k">}</span>
+<span class="k">{</span>"type":"message", "id":<span class="id">"…22"</span>, "parentId":<span class="pid">"…21"</span>, … "assistant" <span class="t">"only changed cells repaint"</span><span class="k">}</span>
+<span class="k">{</span>"type":<span class="lf">"leaf"</span>,    "targetId":<span class="lf">"…22"</span><span class="k">}</span></pre></div>
+  <div class="cap">Entries are abridged here. Every one names its parent, and
+    <b style="color:var(--parent)">…1e</b> is named twice &mdash; that is the fork.</div>
+
+  <div class="join">every <span>parentId</span> is an edge &nbsp;↓</div>
+
+  <h2>the tree those pointers already are</h2>
+  <div class="panel" style="padding:24px 22px 20px">
+    <svg width="880" height="330" viewBox="0 0 880 330" xmlns="http://www.w3.org/2000/svg"
+         font-family="DejaVu Sans Mono, Liberation Mono, monospace">
+      <style>
+        .n    { fill:#161d26; stroke:#2b3644; stroke-width:1.2; }
+        .nid  { fill:#00d7d7; font-size:14.5px; font-weight:700; }
+        .role { fill:#8b95a3; font-size:13px; }
+        .txt  { fill:#7d8590; font-size:13px; }
+        .e    { stroke:#4a5565; stroke-width:1.7; fill:none; }
+      </style>
+
+      <!-- lineage, surveyed in right angles -->
+      <path class="e" d="M386 54 L386 86"/>
+      <path class="e" d="M386 132 L386 158 L196 158 L196 184"/>
+      <path class="e" d="M386 158 L576 158 L576 184"/>
+      <path class="e" d="M196 230 L196 262"/>
+      <path class="e" d="M576 230 L576 262"/>
+
+      <rect class="n" x="286" y="10" width="200" height="44" rx="6"/>
+      <text class="nid" x="302" y="31">…1d</text>
+      <text class="role" x="350" y="31">user</text>
+      <text class="txt"  x="302" y="47">profile the frame time</text>
+
+      <rect class="n" x="286" y="86" width="200" height="44" rx="6"/>
+      <text class="nid" x="302" y="107">…1e</text>
+      <text class="role" x="350" y="107">assistant</text>
+      <text class="txt"  x="302" y="123">redraw runs 40× a sec…</text>
+
+      <rect class="n" x="96" y="184" width="200" height="44" rx="6"/>
+      <text class="nid" x="112" y="205">…1f</text>
+      <text class="role" x="160" y="205">user</text>
+      <text class="txt"  x="112" y="221">memoize the layout…</text>
+
+      <rect class="n" x="96" y="262" width="200" height="44" rx="6"/>
+      <text class="nid" x="112" y="283">…20</text>
+      <text class="role" x="160" y="283">assistant</text>
+      <text class="txt"  x="112" y="299">cached by session…</text>
+
+      <rect class="n" x="476" y="184" width="200" height="44" rx="6"/>
+      <text class="nid" x="492" y="205">…21</text>
+      <text class="role" x="540" y="205">user</text>
+      <text class="txt"  x="492" y="221">try a dirty-rect pass</text>
+
+      <rect class="n" x="476" y="262" width="200" height="44" rx="6"
+            stroke="#f2cc60" stroke-width="1.9"/>
+      <text class="nid" x="492" y="283">…22</text>
+      <text class="role" x="540" y="283">assistant</text>
+      <text class="txt"  x="492" y="299">only changed cells…</text>
+
+      <!-- leaf pointer -->
+      <path d="M690 284 L710 284" stroke="#f2cc60" stroke-width="1.8" fill="none"/>
+      <text x="720" y="281" fill="#f2cc60" font-size="14" font-weight="700">leaf</text>
+      <text x="720" y="298" fill="#a8935a" font-size="12.5">the agent is here</text>
+    </svg>
+  </div>
+  <div class="cap">One file, one tree. Picking another branch moves the leaf
+    &mdash; it does not start a second agent.</div>
+
+</div>

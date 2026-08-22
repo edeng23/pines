@@ -1,0 +1,22 @@
+{
+  "theme": "base",
+  "themeVariables": {
+    "darkMode": true,
+    "background": "#0d1117",
+    "fontFamily": "DejaVu Sans, Liberation Sans, sans-serif",
+    "fontSize": "15px",
+    "primaryColor": "#151b24",
+    "primaryTextColor": "#d5dae1",
+    "primaryBorderColor": "#313d4d",
+    "lineColor": "#5b6878",
+    "textColor": "#d5dae1"
+  },
+  "flowchart": {
+    "curve": "basis",
+    "nodeSpacing": 40,
+    "rankSpacing": 50,
+    "padding": 16,
+    "wrappingWidth": 400,
+    "useMaxWidth": false
+  }
+}
