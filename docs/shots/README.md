@@ -28,8 +28,12 @@ machine that can download the model once.
 |---|---|
 | `branch-diagram.png` | where a linear conversation wants to branch (the post's mermaid flowchart) |
 | `session-tree-diagram.png` | a pi session file, its `parentId` pointers, and the tree they already form |
+| `merge-diagram.png` | one tree on screen against the six session files it is stored as, with the shared entry-id prefix marked |
 
-Each has a `-light.png` twin for light backgrounds. Sources are in `src/`:
+Each has a `-light.png` twin for light backgrounds. `merge-diagram` uses the
+demo's real fork family — the ids, files, and fork points are the ones
+`pnpm demo` writes for "plan the v1 release", the same conversation shown in
+`03-tree.png`. Sources are in `src/`:
 
 ```sh
 # flowchart — needs @mermaid-js/mermaid-cli

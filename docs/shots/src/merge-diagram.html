@@ -1,0 +1,243 @@
+<!doctype html><meta charset="utf-8"><title>one tree, N session files</title>
+<style>
+  :root {
+    --bg:#0d1117; --panel:#11161d; --line:#232c38; --band:#1b2029;
+    --fg:#d5dae1; --muted:#7d8590; --dim:#5b6878;
+    --t1:#00d7d7; --t2:#d2a8ff; --t3:#7ee787; --dup:#f2cc60; --trunk:#c9b27a;
+  }
+  html { height:100%; }
+  body {
+    margin:0; min-height:100vh; box-sizing:border-box;
+    display:flex; align-items:center; justify-content:center; padding-top:110px;
+    background:var(--bg); font-family:"DejaVu Sans","Liberation Sans",sans-serif;
+  }
+  .wrap { display:inline-block; width:940px; }
+  h2 { margin:0 0 12px; font-size:16px; font-weight:600; color:var(--muted); }
+  h2 em { font-style:normal; color:var(--fg); }
+  .panel {
+    background:var(--panel); border:1px solid var(--line);
+    border-radius:9px; padding:18px 20px 14px;
+  }
+  .cap { margin-top:12px; font-size:13.5px; color:var(--dim); line-height:1.6; }
+  .cap b { color:var(--trunk); font-weight:600; }
+  .join { margin:24px 0 20px; text-align:center; font-size:14px; color:var(--dim); }
+  .join b { color:var(--dup); font-weight:700; }
+  .legend { margin-top:10px; font-size:12.5px; color:var(--dim); }
+  .legend .sw {
+    display:inline-block; width:22px; height:11px; border-radius:3px;
+    background:var(--band); border:1px solid #6b5c33; margin-right:6px; vertical-align:-1px;
+  }
+
+  .files { display:flex; gap:9px; align-items:flex-start; }
+  .f {
+    flex:1; background:var(--panel); border:1px solid var(--line);
+    border-radius:8px; overflow:hidden;
+  }
+  .fh {
+    padding:9px 10px 8px; border-bottom:1px solid var(--line); background:#141a22;
+  }
+  .fh .nm {
+    font-family:"DejaVu Sans Mono","Liberation Mono",monospace;
+    font-size:12px; color:var(--fg); display:block;
+  }
+  .fh .of { font-size:10.5px; color:var(--dim); display:block; margin-top:2px; }
+  .rows { padding:7px 0 9px; }
+  .r {
+    font-family:"DejaVu Sans Mono","Liberation Mono",monospace;
+    font-size:12.5px; line-height:23px; padding:0 10px 0 8px;
+    border-left:2px solid transparent; display:flex; justify-content:space-between;
+  }
+  .r .x { font-size:10.5px; color:#8a7434; }
+  .band { background:var(--band); border-left-color:var(--dup); }
+  .band .id { color:var(--trunk); font-weight:700; }
+  .sub  { background:#161b23; border-left-color:#3f4b5c; }
+  .sub .id  { font-weight:700; }
+  .own .id  { font-weight:700; }
+  .c1 .id { color:var(--t1); } .c2 .id { color:var(--t2); } .c3 .id { color:var(--t3); }
+</style>
+<div class="wrap">
+
+  <h2>on screen &mdash; <em>one conversation, one tree</em></h2>
+  <div class="panel">
+    <svg width="898" height="400" viewBox="0 0 898 400" xmlns="http://www.w3.org/2000/svg"
+         font-family="DejaVu Sans Mono, Liberation Mono, monospace">
+      <style>
+        .n  { fill:#161d26; stroke:#2b3644; stroke-width:1.1; }
+        .nb { fill:#1b2029; stroke:#6b5c33; stroke-width:1.2; }
+        .i  { font-size:13px; font-weight:700; }
+        .tx { fill:#7d8590; font-size:10.5px; }
+        .e  { stroke:#4a5565; stroke-width:1.6; fill:none; }
+        .x  { fill:#f2cc60; font-size:10.5px; font-weight:700; }
+      </style>
+
+      <!-- trunk -->
+      <path class="e" d="M449 40 L449 54"/>
+      <path class="e" d="M449 88 L449 102"/>
+      <path class="e" d="M449 136 L449 150"/>
+      <!-- fork out of 4c -->
+      <path class="e" d="M449 184 L449 196 L159 196 L159 208"/>
+      <path class="e" d="M449 196 L739 196 L739 208"/>
+      <path class="e" d="M449 196 L449 208"/>
+      <!-- down each branch -->
+      <path class="e" d="M159 242 L159 256"/><path class="e" d="M159 290 L159 304"/><path class="e" d="M159 338 L159 352"/>
+      <path class="e" d="M449 242 L449 256"/><path class="e" d="M449 290 L449 304"/><path class="e" d="M449 338 L449 352"/>
+      <path class="e" d="M739 242 L739 256"/>
+
+      <!-- shared trunk: in every file -->
+      <rect class="nb" x="359" y="6"   width="180" height="34" rx="6"/>
+      <text class="i" fill="#c9b27a" x="370" y="22">…49</text>
+      <text class="x" x="528" y="22" text-anchor="end">×6</text>
+      <text class="tx" x="370" y="35">plan the v1 release</text>
+
+      <rect class="nb" x="359" y="54"  width="180" height="34" rx="6"/>
+      <text class="i" fill="#c9b27a" x="370" y="70">…4a</text>
+      <text class="x" x="528" y="70" text-anchor="end">×6</text>
+      <text class="tx" x="370" y="83">three blockers…</text>
+
+      <rect class="nb" x="359" y="102" width="180" height="34" rx="6"/>
+      <text class="i" fill="#c9b27a" x="370" y="118">…4b</text>
+      <text class="x" x="528" y="118" text-anchor="end">×6</text>
+      <text class="tx" x="370" y="131">which one first?</text>
+
+      <rect class="nb" x="359" y="150" width="180" height="34" rx="6"/>
+      <text class="i" fill="#c9b27a" x="370" y="166">…4c</text>
+      <text class="x" x="528" y="166" text-anchor="end">×6</text>
+      <text class="tx" x="370" y="179">the flaky test blocks CI</text>
+
+      <!-- branch 1 -->
+      <rect class="n" x="69" y="208" width="180" height="34" rx="6"/>
+      <text class="i" fill="#00d7d7" x="80" y="224">…4d</text>
+      <text class="x" x="238" y="224" text-anchor="end">×2</text>
+      <text class="tx" x="80" y="237">ok, fix the flaky test</text>
+
+      <rect class="n" x="69" y="256" width="180" height="34" rx="6"/>
+      <text class="i" fill="#00d7d7" x="80" y="272">…4e</text>
+      <text class="x" x="238" y="272" text-anchor="end">×2</text>
+      <text class="tx" x="80" y="285">the retry loop races…</text>
+
+      <rect class="n" x="69" y="304" width="180" height="34" rx="6"/>
+      <text class="i" fill="#00d7d7" x="80" y="320">…53</text>
+      <text class="tx" x="80" y="333">write a regression test</text>
+
+      <rect class="n" x="69" y="352" width="180" height="34" rx="6"/>
+      <text class="i" fill="#00d7d7" x="80" y="368">…54</text>
+      <text class="tx" x="80" y="381">red before, green after</text>
+
+      <!-- branch 2 -->
+      <rect class="n" x="359" y="208" width="180" height="34" rx="6"/>
+      <text class="i" fill="#d2a8ff" x="370" y="224">…4f</text>
+      <text class="x" x="528" y="224" text-anchor="end">×2</text>
+      <text class="tx" x="370" y="237">what about slow startup?</text>
+
+      <rect class="n" x="359" y="256" width="180" height="34" rx="6"/>
+      <text class="i" fill="#d2a8ff" x="370" y="272">…50</text>
+      <text class="x" x="528" y="272" text-anchor="end">×2</text>
+      <text class="tx" x="370" y="285">cold boot loads embeddings</text>
+
+      <rect class="n" x="359" y="304" width="180" height="34" rx="6"/>
+      <text class="i" fill="#d2a8ff" x="370" y="320">…55</text>
+      <text class="tx" x="370" y="333">cache them instead?</text>
+
+      <rect class="n" x="359" y="352" width="180" height="34" rx="6"/>
+      <text class="i" fill="#d2a8ff" x="370" y="368">…56</text>
+      <text class="tx" x="370" y="381">memoize by session mtime</text>
+
+      <!-- branch 3 -->
+      <rect class="n" x="649" y="208" width="180" height="34" rx="6"/>
+      <text class="i" fill="#7ee787" x="660" y="224">…51</text>
+      <text class="tx" x="660" y="237">and the docs?</text>
+
+      <rect class="n" x="649" y="256" width="180" height="34" rx="6"/>
+      <text class="i" fill="#7ee787" x="660" y="272">…52</text>
+      <text class="tx" x="660" y="285">README covers install only</text>
+    </svg>
+    <div class="legend"><span class="sw"></span>shaded &mdash; this entry is written in more than one file
+      (<b style="color:#f2cc60">×n</b> = how many)</div>
+  </div>
+
+  <div class="join">every branch is its own file, and each one repeats its parent's entries &mdash; <b>ids and all</b> &nbsp;↓</div>
+
+  <h2>on disk &mdash; <em>six session files, six pi processes</em></h2>
+  <div class="files">
+
+    <div class="f">
+      <div class="fh"><span class="nm">…94fe.jsonl</span><span class="of">the original</span></div>
+      <div class="rows">
+        <div class="r band"><span class="id">…49</span><span class="x">×6</span></div>
+        <div class="r band"><span class="id">…4a</span><span class="x">×6</span></div>
+        <div class="r band"><span class="id">…4b</span><span class="x">×6</span></div>
+        <div class="r band"><span class="id">…4c</span><span class="x">×6</span></div>
+        <div class="r sub c1"><span class="id">…4d</span><span class="x">×2</span></div>
+        <div class="r sub c1"><span class="id">…4e</span><span class="x">×2</span></div>
+      </div>
+    </div>
+
+    <div class="f">
+      <div class="fh"><span class="nm">…d232.jsonl</span><span class="of">forked at …4e</span></div>
+      <div class="rows">
+        <div class="r band"><span class="id">…49</span><span class="x">×6</span></div>
+        <div class="r band"><span class="id">…4a</span><span class="x">×6</span></div>
+        <div class="r band"><span class="id">…4b</span><span class="x">×6</span></div>
+        <div class="r band"><span class="id">…4c</span><span class="x">×6</span></div>
+        <div class="r sub c1"><span class="id">…4d</span><span class="x">×2</span></div>
+        <div class="r sub c1"><span class="id">…4e</span><span class="x">×2</span></div>
+        <div class="r own c1"><span class="id">…53</span></div>
+        <div class="r own c1"><span class="id">…54</span></div>
+      </div>
+    </div>
+
+    <div class="f">
+      <div class="fh"><span class="nm">…57e8.jsonl</span><span class="of">forked at …4c</span></div>
+      <div class="rows">
+        <div class="r band"><span class="id">…49</span><span class="x">×6</span></div>
+        <div class="r band"><span class="id">…4a</span><span class="x">×6</span></div>
+        <div class="r band"><span class="id">…4b</span><span class="x">×6</span></div>
+        <div class="r band"><span class="id">…4c</span><span class="x">×6</span></div>
+        <div class="r sub c2"><span class="id">…4f</span><span class="x">×2</span></div>
+        <div class="r sub c2"><span class="id">…50</span><span class="x">×2</span></div>
+      </div>
+    </div>
+
+    <div class="f">
+      <div class="fh"><span class="nm">…18e3.jsonl</span><span class="of">forked at …50</span></div>
+      <div class="rows">
+        <div class="r band"><span class="id">…49</span><span class="x">×6</span></div>
+        <div class="r band"><span class="id">…4a</span><span class="x">×6</span></div>
+        <div class="r band"><span class="id">…4b</span><span class="x">×6</span></div>
+        <div class="r band"><span class="id">…4c</span><span class="x">×6</span></div>
+        <div class="r sub c2"><span class="id">…4f</span><span class="x">×2</span></div>
+        <div class="r sub c2"><span class="id">…50</span><span class="x">×2</span></div>
+        <div class="r own c2"><span class="id">…55</span></div>
+        <div class="r own c2"><span class="id">…56</span></div>
+      </div>
+    </div>
+
+    <div class="f">
+      <div class="fh"><span class="nm">…80f9.jsonl</span><span class="of">forked at …4c</span></div>
+      <div class="rows">
+        <div class="r band"><span class="id">…49</span><span class="x">×6</span></div>
+        <div class="r band"><span class="id">…4a</span><span class="x">×6</span></div>
+        <div class="r band"><span class="id">…4b</span><span class="x">×6</span></div>
+        <div class="r band"><span class="id">…4c</span><span class="x">×6</span></div>
+        <div class="r own c3"><span class="id">…51</span></div>
+        <div class="r own c3"><span class="id">…52</span></div>
+      </div>
+    </div>
+
+    <div class="f">
+      <div class="fh"><span class="nm">…d1bf.jsonl</span><span class="of">forked at …4c, parked</span></div>
+      <div class="rows">
+        <div class="r band"><span class="id">…49</span><span class="x">×6</span></div>
+        <div class="r band"><span class="id">…4a</span><span class="x">×6</span></div>
+        <div class="r band"><span class="id">…4b</span><span class="x">×6</span></div>
+        <div class="r band"><span class="id">…4c</span><span class="x">×6</span></div>
+      </div>
+    </div>
+
+  </div>
+  <div class="cap">Every file opens with the same four entries, under the same four ids
+    &mdash; <b>…49 …4a …4b …4c</b>. Union the six files by entry id and those repeats collapse
+    onto each other, so the fork becomes an ordinary branch point and nothing is doubled or lost.
+    Six files and six agents on disk; one tree on screen.</div>
+
+</div>
