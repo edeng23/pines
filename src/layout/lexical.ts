@@ -18,8 +18,31 @@ export interface Positionable {
 }
 
 const GOLDEN_ANGLE = Math.PI * (3 - Math.sqrt(5));
-const CLUSTER_SPACING = 14;
-const RING_SPACING = 3.2;
+
+/**
+ * World distance between neighboring trees — the pitch the whole forest is
+ * built to, and the floor the overlap relaxation enforces (the daemon relaxes
+ * with this, so the two never drift apart).
+ */
+export const PITCH = 3.6;
+
+/**
+ * Phyllotaxis coefficient for `r = SPIRAL * sqrt(i)`. A spiral laid out this
+ * way has uniform density, and its nearest-neighbor distance comes out at
+ * ~1.9× the coefficient — so deriving it from PITCH is what makes trees land
+ * a tree-width apart instead of at some unrelated scale.
+ */
+const SPIRAL = PITCH / 1.9;
+
+/**
+ * Air between neighborhoods, as a multiple of the even-density radius. Just
+ * enough that a project reads as its own stand of trees; any more and the
+ * forest is mostly the gaps, which is what zoom-to-fit ends up framing.
+ */
+const CLUSTER_AIR = 1.25;
+
+/** Trees ring their anchor at the forest's own pitch — one even wood. */
+const RING_SPACING = SPIRAL;
 
 function hashString(s: string): number {
   let h = 2166136261;
@@ -58,9 +81,9 @@ export function assignLexicalPositions(trees: Positionable[]): Positionable[] {
     arr.push(t);
   }
 
-  // Anchor per cluster on a deterministic phyllotaxis spiral, ordered by key
-  // hash so anchors are stable regardless of discovery order. Anchors of
-  // clusters that already have placed trees reuse their centroid.
+  // Anchor per cluster on a phyllotaxis spiral, ordered by key hash so anchors
+  // are stable regardless of discovery order. Anchors of clusters that already
+  // have placed trees reuse their centroid.
   const placedByCwd = new Map<string, { x: number; y: number; n: number }>();
   for (const t of trees) {
     if (t.x === 0 && t.y === 0) continue;
@@ -75,6 +98,17 @@ export function assignLexicalPositions(trees: Positionable[]): Positionable[] {
   const keys = [...clusters.keys()].sort((a, b) => hashString(a) - hashString(b));
   const changed: Positionable[] = [];
 
+  // The forest grows outward from the middle at ONE density: a neighborhood's
+  // anchor sits at the radius where the trees placed before it have already
+  // filled the disc (`r ∝ √filled`), so the next stand lands against the last
+  // one instead of out in a field of its own. That ratio — a tree-width
+  // between trees, a stand-width between stands — is what zoom-to-fit frames,
+  // and it is why the forest opens on trees with room to be trees rather than
+  // on a scatter of far-apart dots. (Anchors used to sit on a fixed wide
+  // spiral, so three projects could span 90 world units of mostly nothing.)
+  let filled = trees.length - unplaced.length;
+  let slot = placedByCwd.size;
+
   keys.forEach((key) => {
     const members = clusters.get(key)!;
     let ax: number;
@@ -84,16 +118,15 @@ export function assignLexicalPositions(trees: Positionable[]): Positionable[] {
       ax = placed.x / placed.n;
       ay = placed.y / placed.n;
     } else {
-      // Spiral slot derived purely from the key hash: stable regardless of
-      // discovery order, and a wide slot range keeps distinct clusters from
-      // landing on the same anchor (exact collisions are still safe — the
-      // overlap relaxation separates them).
-      const idx = 1 + (hashString(key) % 97);
-      const r = CLUSTER_SPACING * Math.sqrt(1 + (idx % 12));
-      const theta = idx * GOLDEN_ANGLE;
+      // Radius from how full the forest already is, angle from the golden
+      // turn: two stands never take the same slot, and each new one settles
+      // just outside the wood rather than starting a distant colony.
+      const r = CLUSTER_AIR * SPIRAL * Math.sqrt(filled + members.length / 2);
+      const theta = slot++ * GOLDEN_ANGLE;
       ax = r * Math.cos(theta);
       ay = r * Math.sin(theta);
     }
+    filled += members.length;
 
     // Members ring around the anchor by recency (newest closest).
     members.sort((a, b) => b.mtime - a.mtime);

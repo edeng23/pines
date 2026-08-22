@@ -96,7 +96,9 @@ run tree to tree and disappear behind the wood.
 pnpm build && pnpm demo      # a throwaway forest under ~/.pines-demo
 ```
 
-`pnpm demo` generates ~18 sessions across three projects — including one
+`pnpm demo` generates ~18 sessions across three projects — conversations from
+two turns to a hundred and seventy, so the forest opens on the whole range of
+tree sizes rather than a field of identical saplings — including one
 branched conversation (“plan the v1 release”: sibling branches, a branch of
 a branch, and a parked fork — open it with `→` to see the one-tree merge,
 agent tips, and the metro map) — and starts three
@@ -206,6 +208,13 @@ overlap relaxation. New trees project through the cached basis so **existing
 trees never jump**; `R` refits. Offline or before the model warms, a
 deterministic lexical layout (cwd clusters on a spiral, recency rings) applies
 — the forest always loads instantly.
+
+Either way the forest is packed at **one density**: a project's stand sits at
+the radius where the trees before it have already filled the disc, so a tree
+is a tree-width from its neighbors and a stand is a stand-width from the next
+one. Zoom-to-fit frames that spread — and since it also reserves the sky a
+crown grows into and the room a name runs through, the map opens on trees
+drawn as trees instead of on a scatter of far-apart glyphs.
 
 **Similar trees** (`s`): ranks the forest against the selected tree in two
 stages — a cheap pooled-cosine shortlist over everything, then an exact

@@ -99,6 +99,35 @@ export function ensureVisible(
   };
 }
 
+/**
+ * Margins zoom-to-fit keeps around the trees, in cells. A tree is not a
+ * point: its crown grows UP from its cell and its name runs to the RIGHT, so
+ * the room it needs is lopsided, and framing the *positions* with an even
+ * border either clips crowns off the top row or wastes a third of the pane.
+ * Reserving the drawing's own shape instead is what lets the fit sit close
+ * enough for trees to be drawn as trees.
+ */
+const FIT_MARGIN = { top: 8, bottom: 2, left: 3, right: 13 };
+/** A hair of air beyond the margins, so nothing sits flush against an edge. */
+const FIT_SLACK = 1.06;
+
+/**
+ * The same margins, scaled to the pane. On a short or narrow one the fixed
+ * reserve would be most of the view — and a fit that spends half a 24-row
+ * pane on unused sky puts every tree back to a single glyph, which is the
+ * opposite of what the reserve is for.
+ */
+function fitMargin(vp: Viewport): { top: number; bottom: number; left: number; right: number } {
+  const cap = (want: number, extent: number, share: number) =>
+    Math.max(1, Math.min(want, Math.round(extent * share)));
+  return {
+    top: cap(FIT_MARGIN.top, vp.height, 0.16),
+    bottom: cap(FIT_MARGIN.bottom, vp.height, 0.06),
+    left: cap(FIT_MARGIN.left, vp.width, 0.04),
+    right: cap(FIT_MARGIN.right, vp.width, 0.14),
+  };
+}
+
 /** Fit camera to a set of world points with padding. */
 export function fitCamera(
   points: Array<{ x: number; y: number }>,
@@ -115,12 +144,21 @@ export function fitCamera(
     minY = Math.min(minY, p.y);
     maxY = Math.max(maxY, p.y);
   }
-  const cx = (minX + maxX) / 2;
-  const cy = (minY + maxY) / 2;
   const spanX = Math.max(maxX - minX, 1e-6);
   const spanY = Math.max(maxY - minY, 1e-6);
-  // Padding: 20% margin, and leave room for name labels (~12 cells).
-  const zx = (vp.width - 24) / (spanX * 1.4);
-  const zy = (vp.height - 4) / (spanY * 1.4 * Y_ASPECT);
-  return { cx, cy, zoom: clampZoom(Math.min(zx, zy)) };
+  // Cells left for the trees themselves, once crowns and names are paid for.
+  // Tiny panes can leave nothing: never fit to a negative box.
+  const margin = fitMargin(vp);
+  const roomX = Math.max(vp.width - margin.left - margin.right, 8);
+  const roomY = Math.max(vp.height - margin.top - margin.bottom, 4);
+  const zx = roomX / (spanX * FIT_SLACK);
+  const zy = roomY / (spanY * FIT_SLACK * Y_ASPECT);
+  const zoom = clampZoom(Math.min(zx, zy));
+  // Center on the box the trees may occupy — offset from the pane's center by
+  // half the difference between the margins — so the room bought for crowns
+  // and names ends up where they are actually drawn: the wood sits a little
+  // low and a little left, under its own canopy and beside its own names.
+  const cx = (minX + maxX) / 2 + (margin.right - margin.left) / 2 / zoom;
+  const cy = (minY + maxY) / 2 + (margin.bottom - margin.top) / 2 / (zoom * Y_ASPECT);
+  return { cx, cy, zoom };
 }

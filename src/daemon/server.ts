@@ -48,7 +48,7 @@ import {
 import { watchSessions, type SessionWatcher } from "../store/watcher.js";
 import { ingestSessionFile } from "../session/ingest.js";
 import { parseSessionFile, toTreeDetail } from "../session/parser.js";
-import { assignLexicalPositions, isSanePosition } from "../layout/lexical.js";
+import { assignLexicalPositions, isSanePosition, PITCH } from "../layout/lexical.js";
 import type { ParsedSession } from "../session/parser.js";
 
 /** Human-readable fallback name for sessions that never got an explicit one. */
@@ -238,9 +238,11 @@ export class Daemon {
     const changed = new Set(assignLexicalPositions(all));
     if (changed.size === 0) return;
     // Push newly placed trees out of each other's (and existing trees')
-    // space — minis have real extent at z1, so spacing must respect it.
+    // space — a drawn tree has real extent, so spacing must respect it. The
+    // floor is the layout's own pitch: relaxing to anything else would undo
+    // the even density the placement was built for.
     const points = all.map((rec) => ({ x: rec.x, y: rec.y, pinned: !changed.has(rec), rec }));
-    relax(points, 3.6, 40);
+    relax(points, PITCH, 40);
     for (const p of points) {
       if (p.pinned) continue;
       p.rec.x = p.x;

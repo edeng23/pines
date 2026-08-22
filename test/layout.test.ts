@@ -146,4 +146,36 @@ describe("lexical layout", () => {
     // Nothing left at the unpositioned sentinel.
     for (const t of trees) expect(t.x !== 0 || t.y !== 0).toBe(true);
   });
+
+  it("packs a forest at its own pitch, not into distant colonies", () => {
+    // Zoom-to-fit frames the whole spread, so what a tree is drawn at is set
+    // by spread ÷ neighbor distance — not by either one alone. Anchors used
+    // to sit on a fixed wide spiral, which put three projects 90 units apart
+    // with their trees 3 apart, and the fit collapsed every tree to a glyph.
+    const trees = Array.from({ length: 24 }, (_, i) => ({
+      treeId: `t_${i}`,
+      cwd: `/proj/p${i % 3}`,
+      mtime: i,
+      x: 0,
+      y: 0,
+      pinned: false,
+    }));
+    assignLexicalPositions(trees);
+    relax(trees, 3.6, 40);
+    const near = trees.map((t, i) =>
+      Math.min(
+        ...trees.filter((_, j) => j !== i).map((o) => Math.hypot(t.x - o.x, t.y - o.y)),
+      ),
+    );
+    near.sort((a, b) => a - b);
+    const pitch = near[Math.floor(near.length / 2)]!;
+    const span = Math.max(
+      Math.max(...trees.map((t) => t.x)) - Math.min(...trees.map((t) => t.x)),
+      Math.max(...trees.map((t) => t.y)) - Math.min(...trees.map((t) => t.y)),
+    );
+    // Even density over a disc puts this near √N; the old layout was past 20.
+    expect(span / pitch).toBeLessThan(9);
+    // …and the trees still keep a tree's worth of room between them.
+    expect(pitch).toBeGreaterThan(3);
+  });
 });

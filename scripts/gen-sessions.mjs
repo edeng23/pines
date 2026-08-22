@@ -9,7 +9,14 @@
  *                                                    # from first prompts
  *   node scripts/gen-sessions.mjs --drift 4          # 4 sessions opening on
  *       topic A then drifting to topic B (should land near B's cluster)
+ *   node scripts/gen-sessions.mjs --topics 3 --per 6 --even  # every session
+ *       the same short length (the old behavior; sizes are varied by default)
  *   PINES_PI_SESSIONS=~/somewhere overrides the target root
+ *
+ * Conversations come out at wildly different lengths on purpose: a tree's
+ * size IS its conversation's size, so a generated forest where every session
+ * is two turns long draws a field of identical saplings and says nothing
+ * about growth. The ladder below walks the whole range instead.
  */
 import { mkdirSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
@@ -30,17 +37,83 @@ const drift = Number(flag("drift", 0)) || null;
 // One branched fork FAMILY (root + sibling branches + a nested one + a
 // parked fork) so the demo showcases the one-tree merge, not just dots.
 const family = args.includes("--family");
+// Same-length conversations: what the generator used to do, kept for perf
+// runs where a uniform forest is the point.
+const even = args.includes("--even");
 
 const root =
   process.env.PINES_PI_SESSIONS ?? join(homedir(), ".pi", "agent", "sessions");
 
 const TOPIC_PROMPTS = [
-  ["fix the failing auth tests", "the login flow returns 401", "add oauth token refresh"],
-  ["optimize the render loop", "profile the canvas frame time", "memoize the layout pass"],
-  ["write docs for the API", "add usage examples to the readme", "document the wire protocol"],
-  ["migrate the database schema", "add a sqlite index for search", "backfill the embeddings column"],
-  ["refactor the parser module", "extract the tokenizer", "add error recovery to the lexer"],
+  [
+    "fix the failing auth tests", "the login flow returns 401",
+    "add oauth token refresh", "the refresh races the retry loop",
+    "expire the session cookie on logout", "audit what the token actually signs",
+  ],
+  [
+    "optimize the render loop", "profile the canvas frame time",
+    "memoize the layout pass", "why does resize drop frames?",
+    "batch the writes into one flush", "cache the measured text widths",
+  ],
+  [
+    "write docs for the API", "add usage examples to the readme",
+    "document the wire protocol", "the getting-started page is stale",
+    "explain the daemon lifecycle", "write the migration notes",
+  ],
+  [
+    "migrate the database schema", "add a sqlite index for search",
+    "backfill the embeddings column", "the migration locks on big tables",
+    "make the backfill resumable", "vacuum after the backfill",
+  ],
+  [
+    "refactor the parser module", "extract the tokenizer",
+    "add error recovery to the lexer", "the parser chokes on trailing commas",
+    "give the errors a line and column", "fuzz it against the old parser",
+  ],
 ];
+
+/**
+ * Follow-ups: what turn 7 of a real session looks like. A long conversation
+ * built by cycling a topic's opening prompts reads like a stuck record the
+ * moment anyone opens the tree — these keep it looking like work.
+ */
+const FOLLOW_UPS = [
+  "still red on CI", "why did that work?", "show me the diff",
+  "can you add a test for that?", "roll that last bit back",
+  "what else touches this?", "ship it", "hmm, try the other way",
+  "that broke the other test", "explain the tradeoff",
+  "keep going", "any faster way?",
+];
+
+/** Assistant replies, so a transcript isn't the same line 200 times. */
+const REPLIES = [
+  "Found it — patching now.", "Done. Tests pass locally.",
+  "That path was never covered; adding a case.",
+  "Reverted. The earlier approach was closer.",
+  "Two options here — going with the smaller one.",
+  "Traced it to the retry loop.", "Pushed. CI is green.",
+  "Reproduced it. It only fails on a cold cache.",
+];
+
+/**
+ * Conversation lengths in TURNS, walked in order so a generated forest shows
+ * the whole ladder: saplings beside a tier-broken elder, which is the thing
+ * a screenshot of the forest is supposed to show.
+ */
+const TURN_LADDER = [2, 3, 5, 8, 13, 22, 36, 60, 100, 170];
+
+/** A conversation `turns` long: opening prompts, then real follow-ups. */
+function conversation(bank, turns, seed) {
+  const prompts = [];
+  for (let i = 0; i < turns; i++) {
+    prompts.push(
+      i % 4 === 0
+        ? bank[(seed + i / 4) % bank.length]
+        : FOLLOW_UPS[(seed * 5 + i) % FOLLOW_UPS.length],
+    );
+  }
+  return prompts;
+}
 
 let idCounter = 0;
 const eid = () => (++idCounter).toString(16).padStart(8, "0");
@@ -57,7 +130,7 @@ function makeSession(cwd, prompts, name) {
     }),
   );
   let parent = null;
-  for (const p of prompts) {
+  prompts.forEach((p, i) => {
     const u = eid();
     lines.push(
       JSON.stringify({
@@ -69,11 +142,15 @@ function makeSession(cwd, prompts, name) {
     lines.push(
       JSON.stringify({
         type: "message", id: a, parentId: u, timestamp: new Date().toISOString(),
-        message: { role: "assistant", content: [{ type: "text", text: `working on: ${p}` }], timestamp: Date.now() },
+        message: {
+          role: "assistant",
+          content: [{ type: "text", text: i === 0 ? `working on: ${p}` : REPLIES[i % REPLIES.length] }],
+          timestamp: Date.now(),
+        },
       }),
     );
     parent = a;
-  }
+  });
   if (name) {
     lines.push(
       JSON.stringify({
@@ -109,10 +186,14 @@ if (drift) {
     written++;
   }
 } else if (topics) {
+  // Walk the ladder ACROSS topics, not within one: every project ends up with
+  // its own mix of saplings and old growth, the way a real week of work does.
+  let rung = 0;
   for (let t = 0; t < topics; t++) {
     const bank = TOPIC_PROMPTS[t % TOPIC_PROMPTS.length];
     for (let i = 0; i < per; i++) {
-      const prompts = [bank[i % bank.length], bank[(i + 1) % bank.length]];
+      const turns = even ? 2 : TURN_LADDER[rung++ % TURN_LADDER.length];
+      const prompts = conversation(bank, turns, t * 3 + i);
       writeSession(
         `/proj/topic-${t}`,
         makeSession(`/proj/topic-${t}`, prompts, anon ? null : `${t}-${i}`),
@@ -125,7 +206,8 @@ if (drift) {
   for (let i = 0; i < n; i++) {
     const bank = TOPIC_PROMPTS[i % TOPIC_PROMPTS.length];
     const cwd = `/proj/p${i % 9}`;
-    writeSession(cwd, makeSession(cwd, [bank[i % bank.length]], anon ? null : `gen-${i}`));
+    const turns = even ? 1 : TURN_LADDER[i % TURN_LADDER.length];
+    writeSession(cwd, makeSession(cwd, conversation(bank, turns, i), anon ? null : `gen-${i}`));
     written++;
   }
 }
@@ -160,6 +242,28 @@ function writeFamily(cwd) {
     msg(u3, a2, "user", "ok, fix the flaky test"),
     msg(a3, u3, "assistant", "Found it: the retry loop races the mock clock. Patching."),
   ];
+  // The trunk kept going after the branches came off it, so the family shows
+  // what it is meant to show: forks hanging off OLD growth. A root the same
+  // size as its branches makes the whole fan read as five identical saplings.
+  let tail = a3;
+  for (const [role, text] of [
+    ["user", "run it fifty times"],
+    ["assistant", "Fifty green. The clock is injected now, not patched."],
+    ["user", "what else uses that mock?"],
+    ["assistant", "Two suites — both were leaning on the same race."],
+    ["user", "clean those up too"],
+    ["assistant", "Done. Same fixture, no sleeps left in either."],
+    ["user", "ok, back to the release"],
+    ["assistant", "One blocker down. Docs and startup are still open."],
+    ["user", "cut the changelog while we're here"],
+    ["assistant", "Drafted from the merge log — it's in CHANGELOG.md."],
+    ["user", "tag it rc1"],
+    ["assistant", "Tagged v1.0.0-rc1. CI published the artifacts."],
+  ]) {
+    const id = eid();
+    rootLines.push(msg(id, tail, role, text));
+    tail = id;
+  }
   const rootPath = writeSession(cwd, rootLines.join("\n") + "\n");
   const prefixThrough = (lines, lastId) => {
     const out = [];

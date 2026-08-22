@@ -113,6 +113,24 @@ describe("camera", () => {
     expect(after.wy).toBeCloseTo(before.wy, 6);
   });
 
+  it("fitCamera leaves room above the trees for their crowns", () => {
+    // A tree is drawn UP from its cell and named to its RIGHT. Framing the
+    // positions with an even border put the top row's crown off the canvas.
+    const pts = [
+      { x: -10, y: -5 },
+      { x: 25, y: 12 },
+      { x: 3, y: 40 },
+    ];
+    const cam = fitCamera(pts, vp);
+    const cells = pts.map((p) => worldToCell(cam, vp, p.x, p.y));
+    const top = Math.min(...cells.map((c) => c.y));
+    const bottom = Math.max(...cells.map((c) => c.y));
+    expect(top).toBeGreaterThanOrEqual(6); // MAX_CROWN_H-ish of sky
+    expect(top).toBeGreaterThan(vp.height - bottom); // sky beats floor
+    const right = Math.max(...cells.map((c) => c.x));
+    expect(vp.width - right).toBeGreaterThan(Math.min(...cells.map((c) => c.x)));
+  });
+
   it("fitCamera contains all points in the viewport", () => {
     const pts = [
       { x: -10, y: -5 },

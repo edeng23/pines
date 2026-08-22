@@ -18,6 +18,11 @@
  * and then waiting, so the yellow spinner and the teal attention dot are real
  * status driven by real events. No model is ever called, here or when you
  * press `n` inside the demo.
+ *
+ * The generated conversations run from two turns to a hundred and seventy, on
+ * purpose: a tree's size is its conversation's size, so a sandbox of uniform
+ * two-turn sessions opens on a field of identical saplings and shows none of
+ * the growth the forest is built to draw.
  */
 import { spawn, spawnSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -50,7 +55,7 @@ const demoEnv = { ...process.env, PINES_HOME: HOME, PINES_PI_SESSIONS: SESSIONS 
 // evolves (the branched conversation, new session shapes, …), an old sandbox must not
 // quietly hide it. Bump DEMO_VERSION whenever the generator's output changes
 // and stale sandboxes rebuild themselves on the next `pnpm demo`.
-const DEMO_VERSION = "2"; // 2: branched fork family (one-tree merge showcase)
+const DEMO_VERSION = "3"; // 3: conversations of every length (tree sizes vary)
 const versionFile = join(HOME, "demo-version");
 const sandboxVersion = existsSync(versionFile)
   ? readFileSync(versionFile, "utf8").trim()
