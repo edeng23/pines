@@ -13,10 +13,13 @@ import { join } from "node:path";
 import crypto from "node:crypto";
 
 const root = process.env.PINES_PI_SESSIONS ?? join(homedir(), ".pi", "agent", "sessions");
+// Sessions carry the directory they ran in, and pines refuses to resume a tree
+// whose cwd is gone. Point this at a real path to make the trees resumable.
+const CWD = process.env.PINES_DEMO_CWD ?? "/proj/pines";
 
 const PROJECTS = [
   {
-    cwd: "/proj/pines",
+    cwd: CWD,
     openers: [
       "the canopy flickers on pan", "zoom feels sticky past 4x", "name trees from the first prompt",
       "the sidebar truncates mid-word", "elders lose their trunk when crowded",
@@ -30,7 +33,7 @@ const PROJECTS = [
              "clamp the camera to the world box", "measure the frame time again"],
   },
   {
-    cwd: "/proj/pines",
+    cwd: CWD,
     openers: [
       "the login flow returns 401", "rate limit the search endpoint", "audit the session cookies",
       "refresh tokens expire early", "the health check lies during rollout",
@@ -43,7 +46,7 @@ const PROJECTS = [
              "shorten the idle timeout", "document the window"],
   },
   {
-    cwd: "/proj/pines",
+    cwd: CWD,
     openers: [
       "write docs for the wire protocol", "the changelog page is unreadable",
       "dark mode washes out code blocks", "the nav collapses too early",
@@ -57,7 +60,7 @@ const PROJECTS = [
              "link each entry to its PR", "add a fallback"],
   },
   {
-    cwd: "/proj/pines",
+    cwd: CWD,
     openers: [
       "migrate the sqlite schema", "the daemon leaks pty handles",
       "nightly backups are silent on failure", "disk fills up with old snapshots",
