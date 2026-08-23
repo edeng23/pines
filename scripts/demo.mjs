@@ -28,6 +28,10 @@ import { fileURLToPath } from "node:url";
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const HOME = process.env.PINES_DEMO_HOME ?? join(homedir(), ".pines-demo");
 const SESSIONS = join(HOME, "sessions");
+// The generated sessions need directories that actually exist, or resuming a
+// tree fails with "cwd no longer exists". Keep them inside the sandbox so
+// deleting it still undoes the whole thing.
+const PROJECTS = join(HOME, "projects");
 const FAKE_PI = join(ROOT, "test", "fixtures", "fake-pi.mjs");
 
 const argv = process.argv.slice(2);
@@ -44,13 +48,18 @@ if (!existsSync(cli)) {
   process.exit(1);
 }
 
-const demoEnv = { ...process.env, PINES_HOME: HOME, PINES_PI_SESSIONS: SESSIONS };
+const demoEnv = {
+  ...process.env,
+  PINES_HOME: HOME,
+  PINES_PI_SESSIONS: SESSIONS,
+  PINES_DEMO_PROJECTS: PROJECTS,
+};
 
 // The sandbox is throwaway BY DESIGN — so when the generated content itself
 // evolves (the branched conversation, new session shapes, …), an old sandbox must not
 // quietly hide it. Bump DEMO_VERSION whenever the generator's output changes
 // and stale sandboxes rebuild themselves on the next `pnpm demo`.
-const DEMO_VERSION = "2"; // 2: branched fork family (one-tree merge showcase)
+const DEMO_VERSION = "3"; // 3: conversations of varied length, resumable cwds
 const versionFile = join(HOME, "demo-version");
 const sandboxVersion = existsSync(versionFile)
   ? readFileSync(versionFile, "utf8").trim()
@@ -74,6 +83,7 @@ const existing = readdirSync(SESSIONS).length;
 if (existing === 0) {
   const topics = Math.max(1, Math.min(5, Math.round(trees / 6)));
   const per = Math.max(1, Math.round(trees / topics));
+  for (let t = 0; t < topics; t++) mkdirSync(join(PROJECTS, `topic-${t}`), { recursive: true });
   spawnSync(
     process.execPath,
     [

@@ -34,6 +34,12 @@ const family = args.includes("--family");
 const root =
   process.env.PINES_PI_SESSIONS ?? join(homedir(), ".pi", "agent", "sessions");
 
+// A session records the directory it ran in, and pines refuses to resume a
+// tree whose cwd is gone. Perf runs never resume, so the default stays a fake
+// path; the demo points this at its own sandbox so its trees are resumable.
+const projects = process.env.PINES_DEMO_PROJECTS ?? "/proj";
+const proj = (name) => join(projects, name);
+
 const TOPIC_PROMPTS = [
   ["fix the failing auth tests", "the login flow returns 401", "add oauth token refresh"],
   ["optimize the render loop", "profile the canvas frame time", "memoize the layout pass"],
@@ -41,6 +47,32 @@ const TOPIC_PROMPTS = [
   ["migrate the database schema", "add a sqlite index for search", "backfill the embeddings column"],
   ["refactor the parser module", "extract the tokenizer", "add error recovery to the lexer"],
 ];
+
+/**
+ * Conversation lengths, in exchanges. A tree grows one crown row per rough
+ * doubling of its conversation, and past ninety-odd messages the crown breaks
+ * into tiers over a bark trunk — so a forest of identical two-turn sessions
+ * shows none of the maturity the canopy is built to convey. These span
+ * sapling to old growth, and are walked in order for a deterministic spread.
+ */
+const GROWTH = [1, 1, 2, 2, 3, 4, 6, 8, 11, 15, 20, 27, 35, 45, 58, 74, 92];
+
+/** Generic continuations, so a long session reads like one conversation. */
+const FOLLOW_UPS = [
+  "why does that happen?",
+  "measure it before and after",
+  "does that hold under load?",
+  "add a test for the edge case",
+  "what breaks if we skip it?",
+  "put it behind a flag for now",
+  "check the logs for the last week",
+  "split it into two changes",
+];
+
+/** Open with `bank`, then continue with follow-ups, for `turns` exchanges. */
+const conversation = (bank, turns, seed) =>
+  Array.from({ length: turns }, (_, i) =>
+    i < bank.length ? bank[i] : FOLLOW_UPS[(i + seed) % FOLLOW_UPS.length]);
 
 let idCounter = 0;
 const eid = () => (++idCounter).toString(16).padStart(8, "0");
@@ -105,17 +137,18 @@ if (drift) {
   const [a, b] = [TOPIC_PROMPTS[0], TOPIC_PROMPTS[1]];
   for (let i = 0; i < drift; i++) {
     const prompts = [a[i % a.length], ...Array.from({ length: 6 }, (_, j) => b[(i + j) % b.length])];
-    writeSession(`/proj/drift`, makeSession(`/proj/drift`, prompts, `drift-${i}`));
+    writeSession(proj("drift"), makeSession(proj("drift"), prompts, `drift-${i}`));
     written++;
   }
 } else if (topics) {
   for (let t = 0; t < topics; t++) {
     const bank = TOPIC_PROMPTS[t % TOPIC_PROMPTS.length];
     for (let i = 0; i < per; i++) {
-      const prompts = [bank[i % bank.length], bank[(i + 1) % bank.length]];
+      const opener = [bank[i % bank.length], bank[(i + 1) % bank.length]];
+      const prompts = conversation(opener, GROWTH[written % GROWTH.length], t + i);
       writeSession(
-        `/proj/topic-${t}`,
-        makeSession(`/proj/topic-${t}`, prompts, anon ? null : `${t}-${i}`),
+        proj(`topic-${t}`),
+        makeSession(proj(`topic-${t}`), prompts, anon ? null : `${t}-${i}`),
       );
       written++;
     }
@@ -124,8 +157,9 @@ if (drift) {
   const n = count ?? 20;
   for (let i = 0; i < n; i++) {
     const bank = TOPIC_PROMPTS[i % TOPIC_PROMPTS.length];
-    const cwd = `/proj/p${i % 9}`;
-    writeSession(cwd, makeSession(cwd, [bank[i % bank.length]], anon ? null : `gen-${i}`));
+    const cwd = proj(`p${i % 9}`);
+    const prompts = conversation([bank[i % bank.length]], GROWTH[i % GROWTH.length], i);
+    writeSession(cwd, makeSession(cwd, prompts, anon ? null : `gen-${i}`));
     written++;
   }
 }
@@ -204,5 +238,5 @@ function writeFamily(cwd) {
   return 6;
 }
 
-if (family) written += writeFamily("/proj/topic-0");
+if (family) written += writeFamily(proj("topic-0"));
 console.log(`wrote ${written} session(s) under ${root}`);

@@ -14,7 +14,11 @@ version.
 | `04-flow.png` | flow view: one branch's conversation, root to tip |
 | `05-search.png` | FTS5 search reaching messages inside branches |
 
-Regenerate with `scripts/screenshot/shot.sh` (see the header there).
+Regenerate with `scripts/screenshot/shot.sh` (see the header there). The
+forest shots want a grown-in canopy: `pnpm demo --reset --trees 60` now
+generates conversations of varied length, so the sizes come out on their own.
+`src/gen-stand.mjs` and `src/gen-forest.mjs` predate that fix and are kept
+only for the exact forests in these frames.
 
 The semantic layout is **not** in these shots: the machine that captured
 them could not reach huggingface.co, so the embedding model never loaded

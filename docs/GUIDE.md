@@ -96,7 +96,10 @@ run tree to tree and disappear behind the wood.
 pnpm build && pnpm demo      # a throwaway forest under ~/.pines-demo
 ```
 
-`pnpm demo` generates ~18 sessions across three projects — including one
+`pnpm demo` generates ~18 sessions across three projects, in lengths running
+from a couple of turns to ninety-odd, so the canopy shows saplings, filled-out
+crowns and old growth on bark trunks rather than one sprite repeated —
+including one
 branched conversation (“plan the v1 release”: sibling branches, a branch of
 a branch, and a parked fork — open it with `→` to see the one-tree merge,
 agent tips, and the metro map) — and starts three
