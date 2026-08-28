@@ -226,11 +226,25 @@ projected to 2-D for stability); the `s` list is the honest one.
 {
   "prefixKey": "ctrl+t",
   "boot": "off",
+  "notify": "terminal",
   "maxLiveAgents": 12,
   "piBin": "/path/to/custom/pi",
   "embedModel": "Xenova/bge-small-en-v1.5"
 }
 ```
+
+`notify` rings when an agent finishes, needs input, or crashes while you
+aren't watching it — the terminal is unfocused, or a different agent's pi
+covers the screen. Modes:
+
+- `"terminal"` (default) — desktop toast via OSC escape codes (kitty, iTerm2,
+  WezTerm, Ghostty, foot, Warp); other terminals get a plain BEL. Works over
+  SSH. Inside tmux the toast needs `set -g allow-passthrough on` (tmux ≥ 3.3);
+  the BEL fallback pairs well with tmux's `monitor-bell` window flags.
+- `"bell"` — BEL only.
+- `"system"` — OS notifier (`osascript` on macOS, `notify-send` on Linux):
+  works in any terminal, but not over SSH.
+- `"off"` — silence.
 
 `maxLiveAgents` caps concurrent pi processes (default 12). The slots are a
 warm cache of instantly-attachable sessions — kept full on purpose. When a

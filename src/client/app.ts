@@ -56,6 +56,18 @@ import {
 } from "@earendil-works/pi-tui";
 
 import { loadConfig, prefixByte } from "../shared/config.js";
+import {
+  BELL,
+  buildToastSeq,
+  FOCUS_DISABLE,
+  FOCUS_ENABLE,
+  FOCUS_IN,
+  FOCUS_OUT,
+  shouldNotify,
+  systemNotify,
+  type FocusState,
+  type NotifyMode,
+} from "./notify.js";
 import { clipAnsi, visibleLength } from "./ansi.js";
 import { FAINT, MUTED } from "./theme.js";
 import {
@@ -73,6 +85,8 @@ import {
   familyOf,
 } from "./tree/merge.js";
 import { renderConversation, convLayout, scrollTo } from "./tree/view.js";
+
+const NOTIFY_MODE: NotifyMode = loadConfig().notify ?? "terminal";
 
 const CONFIGURED_PREFIX = loadConfig().prefixKey;
 const PREFIX_KEY = (
@@ -646,6 +660,41 @@ export async function runApp(): Promise<void> {
     setTimeout(() => requestRender(), 3100);
   }
 
+  /* --------------------------- attention notifying -------------------------- */
+
+  /** Terminal focus via CSI ?1004 — tri-state, never assumed when unknown. */
+  let termFocus: FocusState = "unknown";
+  /**
+   * Flap guard: extension-less agents demote to "waiting" on the PTY-quiet
+   * heuristic and can bounce back to "running" mid-task; don't ring on every
+   * bounce.
+   */
+  const lastNotifiedAt = new Map<string, number>();
+  const NOTIFY_COOLDOWN_MS = 30_000;
+
+  /** An agent stopped working (waiting/completed/crashed): tell the user. */
+  function notifyAttention(t: TreeSummary): void {
+    if (NOTIFY_MODE === "off") return;
+    const attachedTreeId = mode.kind === "attached" ? mode.treeId : null;
+    if (!shouldNotify(termFocus, { treeId: t.treeId, attachedTreeId })) return;
+    const now = Date.now();
+    if (now - (lastNotifiedAt.get(t.treeId) ?? 0) < NOTIFY_COOLDOWN_MS) return;
+    lastNotifiedAt.set(t.treeId, now);
+    const verb =
+      t.status === "crashed"
+        ? "crashed"
+        : t.status === "completed"
+          ? "completed"
+          : "finished — waiting for you";
+    const body = `${treeTitle(t).title} ${verb}`;
+    if (NOTIFY_MODE === "system") return systemNotify("pines", body);
+    if (NOTIFY_MODE === "bell") {
+      out.write(BELL);
+      return;
+    }
+    out.write(buildToastSeq("pines", body) ?? BELL);
+  }
+
   /* ----------------------------- data fetching ----------------------------- */
 
   /**
@@ -1192,7 +1241,8 @@ export async function runApp(): Promise<void> {
     if (mode.kind !== "attached") return;
     const treeId = mode.treeId;
     client.send({ t: "detach", treeId });
-    out.write("\x1b[r" + GUEST_INPUT_DISABLE + MOUSE_ENABLE); // reset scroll region
+    // Reset scroll region; re-assert focus reporting (pi may have reset it).
+    out.write("\x1b[r" + GUEST_INPUT_DISABLE + MOUSE_ENABLE + FOCUS_ENABLE);
     mode = { kind: "forest" };
     // Back out to the CONVERSATION, cursor on the branch we were just in.
     void openTree(treeId, forest.get(treeId)?.leafId ?? null);
@@ -1201,7 +1251,8 @@ export async function runApp(): Promise<void> {
   function detachToForest(): void {
     if (mode.kind !== "attached") return;
     client.send({ t: "detach", treeId: mode.treeId });
-    out.write("\x1b[r" + GUEST_INPUT_DISABLE + MOUSE_ENABLE); // reset scroll region
+    // Reset scroll region; re-assert focus reporting (pi may have reset it).
+    out.write("\x1b[r" + GUEST_INPUT_DISABLE + MOUSE_ENABLE + FOCUS_ENABLE);
     mode = { kind: "forest" };
     requestRender();
   }
@@ -1224,6 +1275,15 @@ export async function runApp(): Promise<void> {
       if (prev && prev.status !== "crashed" && t.status === "crashed") {
         const exit = t.lastExitCode != null ? ` (exit ${t.lastExitCode})` : "";
         showToast(`agent crashed: ${treeTitle(t).title}${exit} — see ~/.pines/daemon.log`);
+      }
+      // A working agent stopped (settled, exited, or crashed): ring/toast per
+      // the notify config unless the user is demonstrably already watching.
+      if (
+        prev &&
+        prev.status === "running" &&
+        (t.status === "waiting" || t.status === "completed" || t.status === "crashed")
+      ) {
+        notifyAttention(t);
       }
     }
     for (const id of remove ?? []) {
@@ -1298,7 +1358,7 @@ export async function runApp(): Promise<void> {
     clearInterval(spinnerTimer);
     stdin.setRawMode(false);
     stdin.pause();
-    out.write(GUEST_INPUT_DISABLE + MOUSE_DISABLE + ALT_SCREEN_LEAVE + "\x1b[0m");
+    out.write(GUEST_INPUT_DISABLE + MOUSE_DISABLE + FOCUS_DISABLE + ALT_SCREEN_LEAVE + "\x1b[0m");
   }
 
   function quit(): never {
@@ -1936,6 +1996,19 @@ export async function runApp(): Promise<void> {
 
   router.on("key", (key) => {
     void (async () => {
+      // Focus reporting (?1004): track it here, and pass it through to an
+      // attached pi — it may have asked the outer terminal for these itself.
+      if (key === FOCUS_IN || key === FOCUS_OUT) {
+        termFocus = key === FOCUS_IN ? "focused" : "blurred";
+        if (mode.kind === "attached") {
+          client.send({
+            t: "input",
+            treeId: mode.treeId,
+            data: Buffer.from(key, "utf8").toString("base64"),
+          });
+        }
+        return;
+      }
       if (mode.kind === "attached") {
         // Prefix interception; everything else passes through raw.
         const bytes = Buffer.from(key, "utf8");
@@ -2017,7 +2090,7 @@ export async function runApp(): Promise<void> {
     return n;
   });
 
-  out.write(ALT_SCREEN_ENTER + MOUSE_ENABLE);
+  out.write(ALT_SCREEN_ENTER + MOUSE_ENABLE + FOCUS_ENABLE);
   requestRender();
 }
 
