@@ -240,10 +240,12 @@ terminal without focus reporting, e.g. Apple Terminal, or tmux without
 a provably focused terminal showing the forest/tree views (or that agent's
 own pi) stays quiet. Modes:
 
-- `"terminal"` (default) — desktop toast via OSC escape codes (kitty, iTerm2,
-  WezTerm, Ghostty, foot, Warp); other terminals get a plain BEL. Works over
-  SSH. Inside tmux the toast needs `set -g allow-passthrough on` (tmux ≥ 3.3);
-  the BEL fallback pairs well with tmux's `monitor-bell` window flags.
+- `"terminal"` (default) — BEL plus a desktop toast via OSC escape codes
+  (kitty, iTerm2, WezTerm, Ghostty, foot, Warp). The BEL rides along because
+  a toast can be swallowed silently (alert filtering, notification
+  permission, Focus mode) — hearing it needs your terminal's audible bell on.
+  Works over SSH. Inside tmux the toast needs `set -g allow-passthrough on`
+  (tmux ≥ 3.3); the BEL pairs well with tmux's `monitor-bell` window flags.
 - `"bell"` — BEL only.
 - `"system"` — OS notifier (`osascript` on macOS, `notify-send` on Linux):
   works in any terminal, but not over SSH.

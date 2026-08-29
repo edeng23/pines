@@ -692,7 +692,9 @@ export async function runApp(): Promise<void> {
       out.write(BELL);
       return;
     }
-    out.write(buildToastSeq("pines", body) ?? BELL);
+    // Toast AND bell: the toast can vanish silently (alert filtering, OS
+    // notification permission, Focus mode), so BEL backs it up audibly.
+    out.write(BELL + (buildToastSeq("pines", body) ?? ""));
   }
 
   /* ----------------------------- data fetching ----------------------------- */

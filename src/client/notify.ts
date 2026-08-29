@@ -5,10 +5,12 @@
  * Delivery (config `notify`, default "terminal"):
  *  - "bell":     BEL only. Universal transport; tmux turns it into a window
  *                flag (monitor-bell), macOS Terminal badges the Dock.
- *  - "terminal": desktop toast via OSC escape codes — kitty speaks OSC 99,
- *                iTerm2/WezTerm/Ghostty/foot/Warp speak OSC 9 — wrapped for
- *                tmux passthrough (needs `allow-passthrough on`, tmux ≥ 3.3).
- *                Terminals with no known OSC support fall back to BEL.
+ *  - "terminal": BEL plus a desktop toast via OSC escape codes — kitty
+ *                speaks OSC 99, iTerm2/WezTerm/Ghostty/foot/Warp speak
+ *                OSC 9 — wrapped for tmux passthrough (needs
+ *                `allow-passthrough on`, tmux ≥ 3.3). The BEL rides along
+ *                because a toast can be swallowed silently (alert filtering,
+ *                OS notification permission, Focus mode).
  *  - "system":   spawn the OS notifier (osascript / notify-send), which works
  *                in any terminal but not over SSH.
  *  - "off":      nothing.

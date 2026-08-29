@@ -17,8 +17,8 @@ export interface PinesConfig {
   /**
    * Attention notifications when an agent finishes, needs input, or crashes
    * while you aren't watching it (default "terminal"):
-   * - "terminal": desktop toast via OSC escapes (kitty/iTerm2/WezTerm/Ghostty/
-   *   foot/Warp; tmux needs `allow-passthrough on`), BEL elsewhere.
+   * - "terminal": BEL plus a desktop toast via OSC escapes (kitty/iTerm2/
+   *   WezTerm/Ghostty/foot/Warp; tmux needs `allow-passthrough on`).
    * - "bell": BEL only (tmux window flag, macOS Terminal badge).
    * - "system": spawn the OS notifier (osascript / notify-send).
    * - "off": silence.
