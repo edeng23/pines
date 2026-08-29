@@ -95,22 +95,47 @@ export function shouldNotify(
   return !watchingIt;
 }
 
-/** OS-level toast: fire-and-forget, silent when the notifier is missing. */
-export function systemNotify(title: string, body: string): void {
+/** Fire-and-forget process spawn; never throws, never blocks, never logs. */
+function spawnQuiet(cmd: string, args: string[]): void {
   try {
-    let proc;
-    if (process.platform === "darwin") {
-      // JSON escaping (\" and \\) is valid AppleScript string escaping too.
-      const script = `display notification ${JSON.stringify(body)} with title ${JSON.stringify(title)} sound name "Glass"`;
-      proc = spawn("osascript", ["-e", script], { stdio: "ignore", detached: true });
-    } else if (process.platform === "linux") {
-      proc = spawn("notify-send", ["--", title, body], { stdio: "ignore", detached: true });
-    } else {
-      return;
-    }
+    const proc = spawn(cmd, args, { stdio: "ignore", detached: true });
     proc.on("error", () => {});
     proc.unref();
   } catch {
-    // no notifier on this box — the status dot still tells the story
+    // tool missing on this box — the status dot still tells the story
   }
+}
+
+/**
+ * OS-level toast: `mute` skips the notifier's own sound (a custom
+ * `notifySound` is already playing).
+ */
+export function systemNotify(title: string, body: string, opts?: { mute?: boolean }): void {
+  if (process.platform === "darwin") {
+    // JSON escaping (\" and \\) is valid AppleScript string escaping too.
+    const sound = opts?.mute ? "" : ' sound name "Glass"';
+    const script = `display notification ${JSON.stringify(body)} with title ${JSON.stringify(title)}${sound}`;
+    spawnQuiet("osascript", ["-e", script]);
+  } else if (process.platform === "linux") {
+    spawnQuiet("notify-send", ["--", title, body]);
+  }
+}
+
+/**
+ * A `notifySound` spec → playable file path. A bare macOS system sound name
+ * ("Submarine") resolves under /System/Library/Sounds; anything with a slash
+ * or extension is taken as a literal path.
+ */
+export function resolveSoundPath(spec: string, platform: NodeJS.Platform = process.platform): string {
+  if (platform === "darwin" && !spec.includes("/") && !spec.includes(".")) {
+    return `/System/Library/Sounds/${spec}.aiff`;
+  }
+  return spec;
+}
+
+/** Play the configured sound file (afplay / paplay), fire-and-forget. */
+export function playSound(spec: string): void {
+  const file = resolveSoundPath(spec);
+  if (process.platform === "darwin") spawnQuiet("afplay", [file]);
+  else if (process.platform === "linux") spawnQuiet("paplay", [file]);
 }

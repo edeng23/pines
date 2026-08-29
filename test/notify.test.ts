@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildToastSeq,
   detectOscBackend,
+  resolveSoundPath,
   sanitizeOscText,
   shouldNotify,
   wrapTmuxPassthrough,
@@ -76,6 +77,20 @@ describe("buildToastSeq", () => {
     // Exactly one OSC introducer (ours) and one terminator (ours, at the end).
     expect(seq!.match(/\x1b/g)).toHaveLength(2);
     expect(seq!.endsWith("\x1b\\")).toBe(true);
+  });
+});
+
+describe("resolveSoundPath", () => {
+  it("resolves a bare name to a macOS system sound", () => {
+    expect(resolveSoundPath("Submarine", "darwin")).toBe(
+      "/System/Library/Sounds/Submarine.aiff",
+    );
+  });
+
+  it("keeps explicit paths and extensions as given", () => {
+    expect(resolveSoundPath("/tmp/ding.mp3", "darwin")).toBe("/tmp/ding.mp3");
+    expect(resolveSoundPath("ding.wav", "darwin")).toBe("ding.wav");
+    expect(resolveSoundPath("Submarine", "linux")).toBe("Submarine");
   });
 });
 

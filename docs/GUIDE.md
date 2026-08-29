@@ -227,6 +227,7 @@ projected to 2-D for stability); the `s` list is the honest one.
   "prefixKey": "ctrl+t",
   "boot": "off",
   "notify": "terminal",
+  "notifySound": "Submarine",
   "maxLiveAgents": 12,
   "piBin": "/path/to/custom/pi",
   "embedModel": "Xenova/bge-small-en-v1.5"
@@ -250,6 +251,12 @@ own pi) stays quiet. Modes:
 - `"system"` — OS notifier (`osascript` on macOS, `notify-send` on Linux):
   works in any terminal, but not over SSH.
 - `"off"` — silence.
+
+`notifySound` picks the sound instead of the BEL (or the system notifier's
+default): a macOS system sound name — `Submarine`, `Ping`, `Hero`, `Glass`,
+anything in `/System/Library/Sounds` — or a path to an audio file. Played via
+`afplay` (macOS) / `paplay` (Linux), so unlike the BEL it doesn't depend on
+the terminal's bell settings.
 
 `maxLiveAgents` caps concurrent pi processes (default 12). The slots are a
 warm cache of instantly-attachable sessions — kept full on purpose. When a

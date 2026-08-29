@@ -63,6 +63,7 @@ import {
   FOCUS_ENABLE,
   FOCUS_IN,
   FOCUS_OUT,
+  playSound,
   shouldNotify,
   systemNotify,
   type FocusState,
@@ -87,6 +88,7 @@ import {
 import { renderConversation, convLayout, scrollTo } from "./tree/view.js";
 
 const NOTIFY_MODE: NotifyMode = loadConfig().notify ?? "terminal";
+const NOTIFY_SOUND = loadConfig().notifySound;
 
 const CONFIGURED_PREFIX = loadConfig().prefixKey;
 const PREFIX_KEY = (
@@ -687,14 +689,17 @@ export async function runApp(): Promise<void> {
           ? "completed"
           : "finished — waiting for you";
     const body = `${treeTitle(t).title} ${verb}`;
-    if (NOTIFY_MODE === "system") return systemNotify("pines", body);
+    // A configured notifySound replaces the BEL (and the system notifier's
+    // own sound) as the audible half of every mode.
+    if (NOTIFY_SOUND) playSound(NOTIFY_SOUND);
+    if (NOTIFY_MODE === "system") return systemNotify("pines", body, { mute: !!NOTIFY_SOUND });
     if (NOTIFY_MODE === "bell") {
-      out.write(BELL);
+      if (!NOTIFY_SOUND) out.write(BELL);
       return;
     }
     // Toast AND bell: the toast can vanish silently (alert filtering, OS
     // notification permission, Focus mode), so BEL backs it up audibly.
-    out.write(BELL + (buildToastSeq("pines", body) ?? ""));
+    out.write((NOTIFY_SOUND ? "" : BELL) + (buildToastSeq("pines", body) ?? ""));
   }
 
   /* ----------------------------- data fetching ----------------------------- */
