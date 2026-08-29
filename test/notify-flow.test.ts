@@ -6,7 +6,7 @@
  */
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { execFileSync, spawn, type ChildProcess } from "node:child_process";
-import { chmodSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -33,6 +33,9 @@ async function waitFor(fn: () => boolean, timeoutMs = 8000, what = "condition"):
 beforeAll(async () => {
   home = mkdtempSync(join(tmpdir(), "pines-notify-"));
   mkdirSync(join(home, "sessions"), { recursive: true });
+  // Pin the audible signal to BEL: on macOS the default notifySound ("Hero")
+  // replaces the BEL with an afplay spawn this test cannot observe.
+  writeFileSync(join(home, "config.json"), JSON.stringify({ notifySound: "" }));
   chmodSync(FAKE_PI, 0o755);
   env = {
     ...(process.env as Record<string, string>),
