@@ -78,7 +78,7 @@ export function renderForest(canvas: Canvas, input: ForestRenderInput): Map<numb
 
   // Backdrop (grids, contour rings), then lineage edges: both live under
   // every marker.
-  style.underlay?.(canvas, { vp, visible, spacing: medianSpacing(visible) });
+  style.underlay?.(canvas, { vp, camera, visible, spacing: medianSpacing(visible) });
 
   const byPath = new Map<string, TreeSummary>();
   for (const t of trees) byPath.set(t.sessionPath, t);

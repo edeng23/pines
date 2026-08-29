@@ -11,7 +11,7 @@
  * choice: they come from `status.ts` so a yellow spinner always means
  * "working".
  */
-import type { TreeSummary } from "../../shared/types.js";
+import type { Camera, TreeSummary } from "../../shared/types.js";
 import type { Canvas } from "./canvas.js";
 import type { Viewport } from "./camera.js";
 
@@ -73,6 +73,12 @@ export interface DrawCtx extends PlacedTree {
 
 export interface UnderlayCtx {
   vp: Viewport;
+  /**
+   * The camera, so a backdrop can pin itself to the world: graph paper that
+   * ignores the pan reads as a smudge on the window, not ground under the
+   * trees.
+   */
+  camera: Camera;
   visible: PlacedTree[];
   /**
    * Median distance in cells between a tree and its nearest neighbor. A

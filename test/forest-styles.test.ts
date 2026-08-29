@@ -124,6 +124,32 @@ describe("canopy", () => {
     }
     expect(owners).toContain("neighbor");
   });
+
+  it("pans the graph paper with the forest, not the window", () => {
+    // The grid is anchored to the world: dragging the camera slides the
+    // dots along with the trees instead of leaving them pinned on screen.
+    const vp = { width: 80, height: 24 };
+    const solo = [tree({ treeId: "lone" })];
+    const dotCols = (cx: number): number[] => {
+      const canvas = new Canvas(vp.width, vp.height);
+      renderForest(canvas, {
+        trees: solo,
+        camera: { cx, cy: 0, zoom: 2 },
+        vp,
+        selectedId: null,
+        spinnerFrame: 0,
+      });
+      const row = canvas.render()[0]!.replace(/\x1b\[[0-9;]*m/g, "");
+      return [...row].flatMap((ch, x) => (ch === "·" ? [x] : []));
+    };
+    const before = dotCols(0);
+    // Pan the camera 3 cells' worth left: everything on screen moves 3 right.
+    const after = dotCols(-1.5);
+    expect(before.length).toBeGreaterThan(0);
+    const shifted = before.map((x) => x + 3).filter((x) => x < vp.width);
+    expect(after).toEqual(expect.arrayContaining(shifted));
+    expect(after).not.toEqual(before);
+  });
 });
 
 describe("crowding", () => {
