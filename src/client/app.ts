@@ -88,7 +88,10 @@ import {
 import { renderConversation, convLayout, scrollTo } from "./tree/view.js";
 
 const NOTIFY_MODE: NotifyMode = loadConfig().notify ?? "terminal";
-const NOTIFY_SOUND = loadConfig().notifySound;
+// Default ding: Hero on macOS (afplay + system sounds are always there);
+// elsewhere the BEL remains the default. "" opts back into the plain BEL.
+const NOTIFY_SOUND =
+  loadConfig().notifySound ?? (process.platform === "darwin" ? "Hero" : undefined);
 
 const CONFIGURED_PREFIX = loadConfig().prefixKey;
 const PREFIX_KEY = (

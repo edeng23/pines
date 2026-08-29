@@ -25,10 +25,11 @@ export interface PinesConfig {
    */
   notify?: "off" | "bell" | "terminal" | "system";
   /**
-   * Custom notification sound, replacing the BEL (or the system notifier's
-   * default sound): a macOS system sound name ("Submarine", "Ping", "Hero",
-   * … — see /System/Library/Sounds) or a path to an audio file. Played via
-   * afplay (macOS) / paplay (Linux).
+   * Notification sound, replacing the BEL (or the system notifier's default
+   * sound): a macOS system sound name ("Submarine", "Ping", "Hero", … — see
+   * /System/Library/Sounds) or a path to an audio file. Played via afplay
+   * (macOS) / paplay (Linux). Default: "Hero" on macOS, unset (BEL)
+   * elsewhere; "" opts back into the plain BEL.
    */
   notifySound?: string;
   /**

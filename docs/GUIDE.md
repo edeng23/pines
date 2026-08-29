@@ -256,7 +256,8 @@ own pi) stays quiet. Modes:
 default): a macOS system sound name — `Submarine`, `Ping`, `Hero`, `Glass`,
 anything in `/System/Library/Sounds` — or a path to an audio file. Played via
 `afplay` (macOS) / `paplay` (Linux), so unlike the BEL it doesn't depend on
-the terminal's bell settings.
+the terminal's bell settings. Defaults to `Hero` on macOS (elsewhere the BEL
+is the default); set it to `""` for the plain BEL.
 
 `maxLiveAgents` caps concurrent pi processes (default 12). The slots are a
 warm cache of instantly-attachable sessions — kept full on purpose. When a
