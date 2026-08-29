@@ -226,11 +226,38 @@ projected to 2-D for stability); the `s` list is the honest one.
 {
   "prefixKey": "ctrl+t",
   "boot": "off",
+  "notify": "terminal",
+  "notifySound": "Submarine",
   "maxLiveAgents": 12,
   "piBin": "/path/to/custom/pi",
   "embedModel": "Xenova/bge-small-en-v1.5"
 }
 ```
+
+`notify` rings when an agent finishes, needs input, or crashes while you
+aren't watching it — the terminal is unfocused, focus is unknowable (a
+terminal without focus reporting, e.g. Apple Terminal, or tmux without
+`set -g focus-events on`), or a different agent's pi covers the screen. Only
+a provably focused terminal showing the forest/tree views (or that agent's
+own pi) stays quiet. Modes:
+
+- `"terminal"` (default) — BEL plus a desktop toast via OSC escape codes
+  (kitty, iTerm2, WezTerm, Ghostty, foot, Warp). The BEL rides along because
+  a toast can be swallowed silently (alert filtering, notification
+  permission, Focus mode) — hearing it needs your terminal's audible bell on.
+  Works over SSH. Inside tmux the toast needs `set -g allow-passthrough on`
+  (tmux ≥ 3.3); the BEL pairs well with tmux's `monitor-bell` window flags.
+- `"bell"` — BEL only.
+- `"system"` — OS notifier (`osascript` on macOS, `notify-send` on Linux):
+  works in any terminal, but not over SSH.
+- `"off"` — silence.
+
+`notifySound` picks the sound instead of the BEL (or the system notifier's
+default): a macOS system sound name — `Submarine`, `Ping`, `Hero`, `Glass`,
+anything in `/System/Library/Sounds` — or a path to an audio file. Played via
+`afplay` (macOS) / `paplay` (Linux), so unlike the BEL it doesn't depend on
+the terminal's bell settings. Defaults to `Hero` on macOS (elsewhere the BEL
+is the default); set it to `""` for the plain BEL.
 
 `maxLiveAgents` caps concurrent pi processes (default 12). The slots are a
 warm cache of instantly-attachable sessions — kept full on purpose. When a

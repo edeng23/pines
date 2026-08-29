@@ -15,6 +15,24 @@ export interface PinesConfig {
   /** Boot splash animation: "off" disables it (env PINES_BOOT=off also works). */
   boot?: "on" | "off";
   /**
+   * Attention notifications when an agent finishes, needs input, or crashes
+   * while you aren't watching it (default "terminal"):
+   * - "terminal": BEL plus a desktop toast via OSC escapes (kitty/iTerm2/
+   *   WezTerm/Ghostty/foot/Warp; tmux needs `allow-passthrough on`).
+   * - "bell": BEL only (tmux window flag, macOS Terminal badge).
+   * - "system": spawn the OS notifier (osascript / notify-send).
+   * - "off": silence.
+   */
+  notify?: "off" | "bell" | "terminal" | "system";
+  /**
+   * Notification sound, replacing the BEL (or the system notifier's default
+   * sound): a macOS system sound name ("Submarine", "Ping", "Hero", … — see
+   * /System/Library/Sounds) or a path to an audio file. Played via afplay
+   * (macOS) / paplay (Linux). Default: "Hero" on macOS, unset (BEL)
+   * elsewhere; "" opts back into the plain BEL.
+   */
+  notifySound?: string;
+  /**
    * Embedding model for semantic layout / similarity. Must produce vectors of
    * one consistent dimension; "Xenova/bge-small-en-v1.5" is a known-good 384-d
    * quality upgrade. Changing this triggers a full re-embed on next start.
