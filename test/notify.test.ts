@@ -87,14 +87,20 @@ describe("shouldNotify", () => {
     expect(shouldNotify("blurred", { ...tree, attachedTreeId: "t1" })).toBe(true);
   });
 
-  it("stays quiet when the user is watching the forest or that tree's pi", () => {
+  it("stays quiet when the user is provably watching (known-focused)", () => {
     expect(shouldNotify("focused", { ...tree, attachedTreeId: null })).toBe(false);
     expect(shouldNotify("focused", { ...tree, attachedTreeId: "t1" })).toBe(false);
-    expect(shouldNotify("unknown", { ...tree, attachedTreeId: null })).toBe(false);
   });
 
   it("notifies when a different agent's pi covers the screen", () => {
     expect(shouldNotify("focused", { ...tree, attachedTreeId: "t2" })).toBe(true);
     expect(shouldNotify("unknown", { ...tree, attachedTreeId: "t2" })).toBe(true);
+  });
+
+  it("errs on ringing when the terminal never reports focus", () => {
+    // Apple Terminal / tmux without focus-events: "minimized" and "watching"
+    // are indistinguishable — a missed finish costs more than a spare ping.
+    expect(shouldNotify("unknown", { ...tree, attachedTreeId: null })).toBe(true);
+    expect(shouldNotify("unknown", { ...tree, attachedTreeId: "t1" })).toBe(false);
   });
 });

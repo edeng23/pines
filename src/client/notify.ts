@@ -14,10 +14,10 @@
  *  - "off":      nothing.
  *
  * Suppression: the client tracks terminal focus via CSI ?1004 focus
- * reporting. A blurred terminal always notifies; a focused (or unknown-focus)
- * one notifies only when the finished tree is hidden behind a different
- * attached pi — forest/tree views already surface status changes themselves
- * (teal dot, crash toast).
+ * reporting. A known-focused terminal notifies only when the finished tree
+ * is hidden behind a different attached pi — forest/tree views already
+ * surface status changes themselves (teal dot, crash toast). Blurred, or
+ * unknown (a terminal that never reports focus), rings.
  */
 import { spawn } from "node:child_process";
 
@@ -77,16 +77,20 @@ export function buildToastSeq(
 }
 
 /**
- * Notify only when the user could have missed the event: terminal blurred,
- * or a *different* agent's pi is covering the screen. In forest/tree views
- * the status change is already visible in the UI.
+ * Suppress only when the user is provably looking: terminal known-focused on
+ * the forest/tree views (teal dot, crash toast) or on that very agent's pi.
+ * Unknown focus means a terminal without ?1004 support (Apple Terminal; tmux
+ * without `focus-events on`) — there "minimized" and "watching" look
+ * identical, so err on ringing: a redundant ping beats a missed finish.
  */
 export function shouldNotify(
   focus: FocusState,
   opts: { treeId: string; attachedTreeId: string | null },
 ): boolean {
   if (focus === "blurred") return true;
-  return opts.attachedTreeId !== null && opts.attachedTreeId !== opts.treeId;
+  const watchingIt = opts.attachedTreeId === opts.treeId;
+  if (focus === "focused") return opts.attachedTreeId !== null && !watchingIt;
+  return !watchingIt;
 }
 
 /** OS-level toast: fire-and-forget, silent when the notifier is missing. */
@@ -95,7 +99,7 @@ export function systemNotify(title: string, body: string): void {
     let proc;
     if (process.platform === "darwin") {
       // JSON escaping (\" and \\) is valid AppleScript string escaping too.
-      const script = `display notification ${JSON.stringify(body)} with title ${JSON.stringify(title)}`;
+      const script = `display notification ${JSON.stringify(body)} with title ${JSON.stringify(title)} sound name "Glass"`;
       proc = spawn("osascript", ["-e", script], { stdio: "ignore", detached: true });
     } else if (process.platform === "linux") {
       proc = spawn("notify-send", ["--", title, body], { stdio: "ignore", detached: true });

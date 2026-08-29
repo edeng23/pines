@@ -234,8 +234,11 @@ projected to 2-D for stability); the `s` list is the honest one.
 ```
 
 `notify` rings when an agent finishes, needs input, or crashes while you
-aren't watching it — the terminal is unfocused, or a different agent's pi
-covers the screen. Modes:
+aren't watching it — the terminal is unfocused, focus is unknowable (a
+terminal without focus reporting, e.g. Apple Terminal, or tmux without
+`set -g focus-events on`), or a different agent's pi covers the screen. Only
+a provably focused terminal showing the forest/tree views (or that agent's
+own pi) stays quiet. Modes:
 
 - `"terminal"` (default) — desktop toast via OSC escape codes (kitty, iTerm2,
   WezTerm, Ghostty, foot, Warp); other terminals get a plain BEL. Works over
