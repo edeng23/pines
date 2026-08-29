@@ -5,6 +5,7 @@
  */
 import type { TreeSummary } from "../../shared/types.js";
 import type { Canvas } from "./canvas.js";
+import { worldToCell } from "./camera.js";
 import { FAINT, GRID, MUTED } from "../theme.js";
 import { statusGlyph, statusSgr } from "./status.js";
 import { treeTitle } from "./sidebar.js";
@@ -284,10 +285,18 @@ export const canopy: ForestStyle = {
     // cell's top-left corner and is small enough to vanish. A centered `·`
     // reads as a ruled point. Nothing else in this look draws braille, and
     // the underlay runs before edges and trees, so they still paint over it.
+    //
+    // The ruling keeps its density in cells (world-unit squares would flood
+    // at low zoom and vanish at high), but its phase is pinned to the world
+    // origin: panning slides the paper with the trees, so it reads as ground
+    // they stand on rather than a smudge on the glass.
     const step = ctx.spacing < 8 ? 8 : 6;
-    for (let y = 0; y < ctx.vp.height; y += step / 2) {
-      for (let x = 0; x < ctx.vp.width; x += step) {
-        canvas.set(x, Math.round(y), "·", GRID);
+    const yStep = step / 2;
+    const origin = worldToCell(ctx.camera, ctx.vp, 0, 0);
+    const phase = (v: number, s: number) => ((Math.round(v) % s) + s) % s;
+    for (let y = phase(origin.y, yStep); y < ctx.vp.height; y += yStep) {
+      for (let x = phase(origin.x, step); x < ctx.vp.width; x += step) {
+        canvas.set(x, y, "·", GRID);
       }
     }
   },
