@@ -8,10 +8,11 @@
  */
 import { basename } from "node:path";
 import type { TreeSummary } from "../../shared/types.js";
+import { rowChip } from "../../shared/folders.js";
 import { clipAnsi, visibleLength } from "../ansi.js";
 import { statusGlyph, statusSgr } from "./status.js";
 import { MASCOT, WORDMARK, WORDMARK_SGR } from "./wordmark.js";
-import { MUTED } from "../theme.js";
+import { FAINT, MUTED } from "../theme.js";
 
 /**
  * Display title for a tree: its name (session name or derived first prompt);
@@ -25,9 +26,34 @@ export function treeTitle(t: TreeSummary): { title: string; fallback: boolean } 
 }
 
 export interface SidebarRow {
-  kind: "header" | "tree";
+  /**
+   * header: a muted group caption · tree: one conversation · folder: a
+   * selectable folder line · up: "back out of this folder" (drill) · tabs:
+   * the folder tab strip (tabs).
+   */
+  kind: "header" | "tree" | "folder" | "up" | "tabs";
   treeId?: string;
   label?: string;
+  /** folder/up/header rows: the folder path this row stands for (up: parent). */
+  folder?: string | null;
+  /** Indent level (tree layout nests trees under their folder). */
+  depth?: number;
+  /** folder rows: folded shut (children hidden) — or, in drill, "enterable". */
+  collapsed?: boolean;
+  count?: number;
+  attention?: number;
+  working?: number;
+  /** tree rows: right-hand chip text (folder or directory); undefined = dir. */
+  chip?: string;
+}
+
+/** One tab of the tabs layout's strip. */
+export interface TabSpec {
+  label: string;
+  /** null = all. */
+  tab: string | null;
+  attention: number;
+  working: number;
 }
 
 /**
@@ -49,6 +75,19 @@ export function needsAttention(t: TreeSummary): boolean {
  * their own group at the bottom regardless of status.
  */
 export function sidebarRows(trees: TreeSummary[]): SidebarRow[] {
+  return stateGroupRows(trees);
+}
+
+/**
+ * The state grouping as rows, reusable under any folder layout. `headers`
+ * off drops the captions (a folder section already names the group);
+ * `chipBase` decides what the rows' chips say — a folder relative to the
+ * one in view, else the directory (see rowChip).
+ */
+export function stateGroupRows(
+  trees: TreeSummary[],
+  opts: { headers?: boolean; chipBase?: string | null; depth?: number } = {},
+): SidebarRow[] {
   const needsInput: TreeSummary[] = [];
   const working: TreeSummary[] = [];
   const recent: TreeSummary[] = [];
@@ -68,8 +107,15 @@ export function sidebarRows(trees: TreeSummary[]): SidebarRow[] {
   const rows: SidebarRow[] = [];
   const push = (label: string, group: TreeSummary[]) => {
     if (group.length === 0) return;
-    rows.push({ kind: "header", label });
-    for (const t of group) rows.push({ kind: "tree", treeId: t.treeId });
+    if (opts.headers !== false) rows.push({ kind: "header", label });
+    for (const t of group) {
+      rows.push({
+        kind: "tree",
+        treeId: t.treeId,
+        depth: opts.depth,
+        chip: opts.chipBase === undefined ? undefined : rowChip(t, opts.chipBase),
+      });
+    }
   };
   push("needs input", needsInput);
   push("working", working);
@@ -105,6 +151,52 @@ export interface SidebarRenderInput {
   now: number;
   /** When present, a mascot header (pine + name/version/status) tops the list. */
   brand?: { version: string; pi: string; home: string };
+  /**
+   * Selected folder key ("folder:<path>") when the cursor sits on a folder
+   * row instead of a tree; wins over selectedId for highlighting.
+   */
+  selectedKey?: string | null;
+  /** tabs layout: the strip's tabs and which is active. */
+  tabs?: { specs: TabSpec[]; active: string | null };
+}
+
+/** Cell spans of the tab strip, for click-to-switch. */
+export interface TabSpan {
+  x0: number;
+  x1: number;
+  tab: string | null;
+}
+
+/**
+ * Render the tab strip on one line: ` all │ work●2 │ side ` with the active
+ * tab inverted. Returns the line (unpadded) and each tab's cell span.
+ */
+export function renderTabStrip(
+  specs: TabSpec[],
+  active: string | null,
+  width: number,
+): { line: string; spans: TabSpan[] } {
+  let line = " ";
+  let x = 1;
+  const spans: TabSpan[] = [];
+  specs.forEach((s, i) => {
+    if (i > 0) {
+      line += `\x1b[${FAINT}m│\x1b[0m`;
+      x += 1;
+    }
+    const dot = s.attention > 0 ? `●${s.attention}` : s.working > 0 ? `◐${s.working}` : "";
+    const text = ` ${s.label}${dot} `;
+    const isActive = s.tab === active;
+    const dotSgr = s.attention > 0 ? "1;38;5;44" : "33";
+    const body = isActive
+      ? `\x1b[7m${text}\x1b[0m`
+      : `\x1b[0m ${s.label}${dot ? `\x1b[${dotSgr}m${dot}\x1b[0m` : ""} `;
+    spans.push({ x0: x, x1: x + text.length - 1, tab: s.tab });
+    line += body;
+    x += text.length;
+  });
+  if (x > width) line = clipAnsi(line, width);
+  return { line, spans };
 }
 
 /** Rows the mascot header consumes (0 when it doesn't fit or isn't wanted). */
@@ -123,10 +215,22 @@ export function sidebarHeaderH(input: {
 export function renderSidebar(input: SidebarRenderInput): {
   lines: string[];
   lineToTree: (string | null)[];
+  /** Per-line row (folder/up/tabs rows are click targets too). */
+  lineToRow: (SidebarRow | null)[];
+  /** Cell spans of the tab strip, when one was drawn. */
+  tabSpans: TabSpan[];
+  /** Screen line of the tab strip, when one was drawn. */
+  tabLine: number | null;
 } {
   const { trees, rows, selectedId, width, height, scroll, spinnerFrame, now } = input;
   const lines: string[] = [];
   const lineToTree: (string | null)[] = [];
+  const lineToRow: (SidebarRow | null)[] = [];
+  let tabSpans: TabSpan[] = [];
+  let tabLine: number | null = null;
+  const selectedFolder = input.selectedKey?.startsWith("folder:")
+    ? input.selectedKey.slice("folder:".length)
+    : null;
 
   const pad = (s: string) => {
     const clipped = clipAnsi(s, width);
@@ -162,13 +266,17 @@ export function renderSidebar(input: SidebarRenderInput): {
       pad(` ${counts}`),
       pad(""),
     );
-    for (let i = 0; i < headerH; i++) lineToTree.push(null);
+    for (let i = 0; i < headerH; i++) {
+      lineToTree.push(null);
+      lineToRow.push(null);
+    }
   }
   const listH = height - headerH;
 
   if (rows.length === 0) {
     lines.push(pad(""), pad(` \x1b[${MUTED}m(no trees yet)\x1b[0m`));
     lineToTree.push(null, null);
+    lineToRow.push(null, null);
   }
 
   for (let i = scroll; i < Math.min(rows.length, scroll + listH); i++) {
@@ -176,25 +284,71 @@ export function renderSidebar(input: SidebarRenderInput): {
     if (row.kind === "header") {
       lines.push(pad(` \x1b[${MUTED}m${row.label}\x1b[0m`));
       lineToTree.push(null);
+      lineToRow.push(row);
+      continue;
+    }
+    if (row.kind === "tabs") {
+      const strip = renderTabStrip(input.tabs?.specs ?? [], input.tabs?.active ?? null, width);
+      tabSpans = strip.spans;
+      tabLine = lines.length;
+      lines.push(pad(strip.line));
+      lineToTree.push(null);
+      lineToRow.push(row);
+      continue;
+    }
+    if (row.kind === "up") {
+      const target = row.folder ?? "top level";
+      lines.push(pad(` \x1b[${MUTED}m◂ ..  ${truncate(target, width - 8)}\x1b[0m`));
+      lineToTree.push(null);
+      lineToRow.push(row);
+      continue;
+    }
+    if (row.kind === "folder") {
+      // ` ▾ work            ●2 ◐1 7 ` — the caret says folded/open (or, in
+      // drill, "enterable"); counts on the right mirror the header's.
+      const selected = row.folder === selectedFolder;
+      const indent = " ".repeat(row.depth ?? 0);
+      const caret = row.collapsed ? "▸" : "▾";
+      const counts = [
+        row.attention ? `\x1b[1;38;5;44m●${row.attention}\x1b[0m` : "",
+        row.working ? `\x1b[33m◐${row.working}\x1b[0m` : "",
+        `\x1b[${MUTED}m${row.count ?? 0}\x1b[0m`,
+      ]
+        .filter(Boolean)
+        .join(" ");
+      const countsW = visibleLength(counts);
+      const nameW = Math.max(4, width - 5 - indent.length - countsW);
+      const name = truncate(row.label ?? row.folder ?? "", nameW).padEnd(nameW);
+      const nameSgr = selected ? "7" : "1";
+      lines.push(
+        pad(` ${indent}\x1b[${MUTED}m${caret}\x1b[0m \x1b[${nameSgr}m${name}\x1b[0m ${counts} `),
+      );
+      lineToTree.push(null);
+      lineToRow.push(row);
       continue;
     }
     const t = trees.get(row.treeId!);
     if (!t) {
       lines.push(pad(""));
       lineToTree.push(null);
+      lineToRow.push(null);
       continue;
     }
-    const selected = t.treeId === selectedId;
+    const selected = t.treeId === selectedId && !selectedFolder;
     const glyph = statusGlyph(t, spinnerFrame);
     const sgr = statusSgr(t);
     const age = humanAge(t.mtime, now);
     const { title, fallback } = treeTitle(t);
+    const indent = " ".repeat(row.depth ?? 0);
     // ` ✻ title…… dir 12m ` — title flexes; the directory is a light label
     // (Claude Agents keeps cwd as metadata, never the name).
     // The row template costs exactly 5 cells of chrome (edges, glyph, gaps):
     // reserve no more than that, every spare cell belongs to the title.
-    const avail = Math.max(4, width - 5 - age.length);
-    let dirChip = width >= 32 && t.name && t.cwd ? basename(t.cwd).slice(0, 10) : "";
+    const avail = Math.max(4, width - 5 - age.length - indent.length);
+    // The chip: the folder when the layout shows folders as chips, else
+    // the directory — either way garnish, never at the title's expense.
+    const chipText = row.chip ?? (t.cwd ? basename(t.cwd) : "");
+    let dirChip = width >= 32 && t.name && chipText ? chipText.slice(0, 10) : "";
     // The title is the information; the chip is garnish. A title that would
     // be cropped to make room for the chip wins the space instead.
     if (dirChip && title.length > avail - (dirChip.length + 1)) dirChip = "";
@@ -205,20 +359,29 @@ export function renderSidebar(input: SidebarRenderInput): {
     const chip = dirChip ? `\x1b[${MUTED}m${dirChip}\x1b[0m ` : "";
     lines.push(
       pad(
-        ` \x1b[${sgr}m${glyph}\x1b[0m \x1b[${nameSgr}m${shownName}\x1b[0m ${chip}\x1b[${MUTED}m${age}\x1b[0m `,
+        ` ${indent}\x1b[${sgr}m${glyph}\x1b[0m \x1b[${nameSgr}m${shownName}\x1b[0m ${chip}\x1b[${MUTED}m${age}\x1b[0m `,
       ),
     );
     lineToTree.push(t.treeId);
+    lineToRow.push(row);
   }
 
   while (lines.length < height) {
     lines.push(pad(""));
     lineToTree.push(null);
+    lineToRow.push(null);
   }
-  return { lines, lineToTree };
+  return { lines, lineToTree, lineToRow, tabSpans, tabLine };
 }
 
-/** Clamp scroll so the selected row stays visible. */
+function truncate(s: string, n: number): string {
+  return s.length <= n ? s : s.slice(0, Math.max(0, n - 1)) + "…";
+}
+
+/**
+ * Clamp scroll so the selected row stays visible. `selectedId` is a tree id
+ * or a folder key ("folder:<path>") — whichever row the cursor is on.
+ */
 export function sidebarScrollTo(
   rows: SidebarRow[],
   selectedId: string | null,
@@ -226,7 +389,10 @@ export function sidebarScrollTo(
   height: number,
 ): number {
   if (!selectedId) return Math.max(0, Math.min(scroll, rows.length - height));
-  const idx = rows.findIndex((r) => r.treeId === selectedId);
+  const folder = selectedId.startsWith("folder:") ? selectedId.slice("folder:".length) : null;
+  const idx = rows.findIndex((r) =>
+    folder !== null ? r.kind === "folder" && r.folder === folder : r.kind === "tree" && r.treeId === selectedId,
+  );
   if (idx < 0) return scroll;
   // Keep the group header above the selection visible when it's adjacent.
   const top = idx > 0 && rows[idx - 1]!.kind === "header" ? idx - 1 : idx;

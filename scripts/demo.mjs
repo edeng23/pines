@@ -10,6 +10,10 @@
  *   pnpm demo --reset      # throw it away and generate a fresh one
  *   pnpm demo --no-agents  # dormant sessions only
  *
+ * The generated sessions come pre-filed into folders (projects/<topic>),
+ * the live agents deliberately not — so every folder layout (F cycles the
+ * four) has folders, nesting and an unfiled group to show.
+ *
  * Everything lives under ~/.pines-demo: its own daemon, socket, database and
  * sessions directory. Your real ~/.pines and ~/.pi are never opened, and
  * deleting that one directory undoes the whole thing.
@@ -50,7 +54,7 @@ const demoEnv = { ...process.env, PINES_HOME: HOME, PINES_PI_SESSIONS: SESSIONS 
 // evolves (the branched conversation, new session shapes, …), an old sandbox must not
 // quietly hide it. Bump DEMO_VERSION whenever the generator's output changes
 // and stale sandboxes rebuild themselves on the next `pnpm demo`.
-const DEMO_VERSION = "2"; // 2: branched fork family (one-tree merge showcase)
+const DEMO_VERSION = "3"; // 2: branched fork family (one-tree merge showcase) · 3: folders
 const versionFile = join(HOME, "demo-version");
 const sandboxVersion = existsSync(versionFile)
   ? readFileSync(versionFile, "utf8").trim()
@@ -111,8 +115,10 @@ if (existing === 0) {
   }
 }
 
+if (existing === 0) await seedFolders();
+
 process.stdout.write(
-  `\x1b[2mdemo forest in ${HOME} — r renames a tree, ? for keys, q quits\x1b[0m\n`,
+  `\x1b[2mdemo forest in ${HOME} — r renames a tree, m files it in a folder, F cycles the folder layouts, ? for keys, q quits\x1b[0m\n`,
 );
 
 // Hand the terminal over to pines, pointed entirely at the sandbox.
@@ -124,3 +130,48 @@ app.on("exit", (code) => {
   );
   process.exit(code ?? 0);
 });
+
+/**
+ * File the generated sessions by their project directory (projects/topic-N),
+ * leaving the spawned agents unfiled. Runs against the daemon like the
+ * client does: folders are daemon state, not something the generator can
+ * write into a session file.
+ */
+async function seedFolders() {
+  const { DaemonClient } = await import(join(ROOT, "dist", "client", "daemon-client.js"));
+  // The CLI reads its home from the environment at import time.
+  Object.assign(process.env, demoEnv);
+  let client;
+  try {
+    client = await DaemonClient.connect({ cols: 80, rows: 24 });
+  } catch {
+    return; // no daemon → the app starts one; folders can be added by hand (m)
+  }
+  const forest = new Map(client.helloOk.forest.map((t) => [t.treeId, t]));
+  client.on("forest_update", ({ upsert, remove }) => {
+    for (const t of upsert ?? []) forest.set(t.treeId, t);
+    for (const id of remove ?? []) forest.delete(id);
+  });
+  // The watcher ingests the generated files asynchronously: wait until the
+  // count of generated trees stops growing (a quiet second), capped at 10s.
+  const generated = () => [...forest.values()].filter((t) => t.cwd?.startsWith("/proj/")).length;
+  const deadline = Date.now() + 10_000;
+  let seen = -1;
+  let quietSince = Date.now();
+  while (Date.now() < deadline) {
+    const n = generated();
+    if (n !== seen) {
+      seen = n;
+      quietSince = Date.now();
+    } else if (n > 0 && Date.now() - quietSince > 1000) {
+      break;
+    }
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  for (const t of forest.values()) {
+    if (!t.cwd?.startsWith("/proj/")) continue;
+    const topic = t.cwd.slice(t.cwd.lastIndexOf("/") + 1);
+    await client.request({ t: "set_folder", id: client.rid(), treeId: t.treeId, folder: `projects/${topic}` });
+  }
+  client.close();
+}

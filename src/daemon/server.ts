@@ -24,11 +24,13 @@ import {
   type ResumeTreeMsg,
   type SearchMsg,
   type SetArchivedMsg,
+  type SetFolderMsg,
   type SetLabelMsg,
   type SimilarMsg,
   type SpawnTreeMsg,
 } from "../shared/protocol.js";
 import { daemonLogPath, ensurePinesHome, socketPath } from "../shared/paths.js";
+import { normalizeFolder } from "../shared/folders.js";
 import {
   clearDaemonPid,
   isServerListening,
@@ -194,6 +196,7 @@ export class Daemon {
         // still unlooked-at after the daemon comes back.
         seen: row.seen === 1,
         archived: row.archived === 1,
+        folder: row.folder ?? null,
       }, row.tree_id);
     }
     // Fork points (graft ordinal 0) hydrate parentEntryId for fork chips.
@@ -229,6 +232,7 @@ export class Daemon {
       x: rec.x,
       y: rec.y,
       archived: rec.archived ? 1 : 0,
+      folder: rec.folder,
     });
   }
 
@@ -542,6 +546,8 @@ export class Daemon {
         return this.handleSetLabel(client, msg);
       case "set_archived":
         return this.handleSetArchived(client, msg);
+      case "set_folder":
+        return this.handleSetFolder(client, msg);
       case "relayout":
         this.semantic.refit();
         client.wire.send({ t: "result", re: msg.id, ok: true });
@@ -814,6 +820,18 @@ export class Daemon {
     }
     if (rec.archived !== msg.archived) {
       rec.archived = msg.archived;
+      this.supervisor.notify(rec); // persist + broadcast
+    }
+    client.wire.send({ t: "result", re: msg.id, ok: true });
+  }
+
+  protected async handleSetFolder(client: ClientConn, msg: SetFolderMsg): Promise<void> {
+    const rec = this.supervisor.trees.get(msg.treeId);
+    if (!rec) return this.fail(client, msg.id, "unknown tree");
+    const folder = normalizeFolder(msg.folder);
+    if (msg.folder && !folder) return this.fail(client, msg.id, "empty folder name");
+    if (rec.folder !== folder) {
+      rec.folder = folder;
       this.supervisor.notify(rec); // persist + broadcast
     }
     client.wire.send({ t: "result", re: msg.id, ok: true });

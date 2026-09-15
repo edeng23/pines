@@ -7,7 +7,7 @@ import { dbPath, ensurePinesHome } from "../shared/paths.js";
 
 export type DB = Database.Database;
 
-const SCHEMA_VERSION = 3;
+const SCHEMA_VERSION = 4;
 
 function schemaSql(): string {
   // dist/store/db.js → ../../src/store/schema.sql (schema ships as source).
@@ -58,6 +58,9 @@ function migrate(db: DB, from: number): void {
   if (from < 3) {
     addColumn("ALTER TABLE trees ADD COLUMN embedding_version INTEGER NOT NULL DEFAULT 0");
   }
+  if (from < 4) {
+    addColumn("ALTER TABLE trees ADD COLUMN folder TEXT");
+  }
   db.prepare("UPDATE meta SET value = ? WHERE key = 'schema_version'").run(String(SCHEMA_VERSION));
 }
 
@@ -80,6 +83,7 @@ export interface TreeRow {
   y: number;
   pinned: number;
   archived: number;
+  folder: string | null;
   last_screen: Buffer | null;
   created_at: number;
   updated_at: number;
@@ -130,8 +134,8 @@ export function upsertTree(
   } else {
     db.prepare(
       `INSERT INTO trees (tree_id, session_path, session_id, name, cwd, parent_session_path,
-         status, seen, leaf_id, node_count, mtime, ingest_offset, x, y, archived, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         status, seen, leaf_id, node_count, mtime, ingest_offset, x, y, archived, folder, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
       row.tree_id,
       row.session_path,
@@ -148,6 +152,7 @@ export function upsertTree(
       row.x ?? 0,
       row.y ?? 0,
       row.archived ?? 0,
+      row.folder ?? null,
       now,
       now,
     );

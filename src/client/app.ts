@@ -41,10 +41,28 @@ import {
   renderSidebar,
   sidebarHeaderH,
   sidebarOrder,
-  sidebarRows,
   sidebarScrollTo,
   treeTitle,
+  type SidebarRow,
+  type TabSpan,
 } from "./forest/sidebar.js";
+import {
+  emptyFolderView,
+  FOLDER_UX_INFO,
+  folderForNewTree,
+  folderIndex,
+  folderKey,
+  folderOfKey,
+  folderRows,
+  nextFolderUx,
+  scopeFolder,
+  sidebarKeys,
+  tabSpecs,
+  UNFILED_TAB,
+  type FolderViewState,
+} from "./forest/folders.js";
+import { folderParent, inFolder, normalizeFolder } from "../shared/folders.js";
+import { scopeTrees } from "./forest/folders.js";
 import { loadUiState, saveUiState } from "./uistate.js";
 import {
   decodeKittyPrintable,
@@ -259,6 +277,32 @@ export async function runApp(): Promise<void> {
   // every launch starts with a clean forest.
   let showArchived = false;
 
+  /* -------------------------------- folders -------------------------------- */
+
+  // Four sidebar treatments of folders, cycled with F (see forest/folders.ts).
+  // The layout and the tree layout's folds persist; which folder is open,
+  // tabbed or filtered is session-local like showArchived.
+  const folderView: FolderViewState = emptyFolderView(ui.folderUx);
+  for (const f of ui.collapsedFolders) folderView.collapsed.add(f);
+  /** The list cursor sits on this folder row (tree/drill layouts), not on a tree. */
+  let cursorFolder: string | null = null;
+
+  /** The selection key the sidebar highlights: a folder row or the tree. */
+  function cursorKey(): string | null {
+    return cursorFolder ? folderKey(cursorFolder) : selectedId;
+  }
+
+  /** Cache key for the folder scope (what the canvas and list show). */
+  function scopeKey(): string {
+    return `${folderView.ux}:${scopeFolder(folderView) ?? ""}`;
+  }
+
+  function saveFolderUi(): void {
+    ui.folderUx = folderView.ux;
+    ui.collapsedFolders = [...folderView.collapsed];
+    saveUiState(ui);
+  }
+
   /** Trees the forest canvas and sidebar currently show. */
   function visibleTrees(): TreeSummary[] {
     const all = [...forest.values()];
@@ -292,7 +336,30 @@ export async function runApp(): Promise<void> {
   // ask several times per frame — memoize on the forest's edit version.
   let forestVersion = 0;
   let convCache: { version: number; archived: boolean; out: TreeSummary[] } | null = null;
+  let scopeCache: { version: number; archived: boolean; scope: string; out: TreeSummary[] } | null =
+    null;
+  /**
+   * Conversations in the folder scope the sidebar layout puts in view —
+   * what the canvas draws and the list shows. The tree layout scopes
+   * nothing; drill/tabs/chips narrow to the folder in focus.
+   */
   function conversations(): TreeSummary[] {
+    const scope = scopeKey();
+    if (
+      scopeCache &&
+      scopeCache.version === forestVersion &&
+      scopeCache.archived === showArchived &&
+      scopeCache.scope === scope
+    ) {
+      return scopeCache.out;
+    }
+    const out = scopeTrees(allConversations(), folderView);
+    scopeCache = { version: forestVersion, archived: showArchived, scope, out };
+    return out;
+  }
+
+  /** Every conversation regardless of folder scope (tab strip, pickers). */
+  function allConversations(): TreeSummary[] {
     if (
       convCache &&
       convCache.version === forestVersion &&
@@ -328,6 +395,9 @@ export async function runApp(): Promise<void> {
   let camera: Camera = fitCamera(conversations(), forestVp());
   let sidebarScroll = 0;
   let sidebarLineToTree: (string | null)[] = [];
+  let sidebarLineToRow: (SidebarRow | null)[] = [];
+  let sidebarTabSpans: TabSpan[] = [];
+  let sidebarTabLine: number | null = null;
   let dividerDrag = false;
   // Start with the most attention-worthy tree selected so ↵/a/x work
   // immediately; tab continues from it.
@@ -410,7 +480,12 @@ export async function runApp(): Promise<void> {
   }
 
   function breadcrumb(): string {
-    if (mode.kind === "forest") return "forest";
+    if (mode.kind === "forest") {
+      // The folder in focus is a level of the hierarchy: forest ▸ work ▸ auth.
+      const scope = scopeFolder(folderView);
+      if (scope === UNFILED_TAB) return "forest ▸ unfiled";
+      return scope ? `forest ▸ ${scope.split("/").join(" ▸ ")}` : "forest";
+    }
     if (mode.kind === "tree") {
       const t = forest.get(mode.rootId);
       return `forest ▸ ${t ? treeTitle(t).title : mode.rootId}`;
@@ -453,7 +528,8 @@ export async function runApp(): Promise<void> {
         trees: conversations(),
         camera,
         vp: cvp,
-        selectedId,
+        // A cursor on a folder row highlights nothing on the canvas.
+        selectedId: cursorFolder ? null : selectedId,
         spinnerFrame,
       });
       lastCanvas = canvas; // retained for mouse hit-testing
@@ -461,28 +537,39 @@ export async function runApp(): Promise<void> {
       const sw = sidebarW();
       if (sw > 0) {
         const convs = conversations();
-        const rows = sidebarRows(convs);
+        const rows = currentRows();
         const headerH = sidebarHeaderH({ brand, width: sw, height: view.height });
-        sidebarScroll = sidebarScrollTo(rows, selectedId, sidebarScroll, view.height - headerH);
+        sidebarScroll = sidebarScrollTo(rows, cursorKey(), sidebarScroll, view.height - headerH);
         const sb = renderSidebar({
           trees: new Map(convs.map((t) => [t.treeId, t])),
           rows,
           selectedId,
+          selectedKey: cursorKey(),
           width: sw,
           height: view.height,
           scroll: sidebarScroll,
           spinnerFrame,
           now: Date.now(),
           brand,
+          tabs:
+            folderView.ux === "tabs"
+              ? { specs: tabSpecs(allConversations()), active: folderView.tab }
+              : undefined,
         });
         sidebarLineToTree = sb.lineToTree;
+        sidebarLineToRow = sb.lineToRow;
+        sidebarTabSpans = sb.tabSpans;
+        sidebarTabLine = sb.tabLine;
         body = body.map((row, i) => `${sb.lines[i]}\x1b[${FAINT}m│\x1b[0m${row}`);
       } else {
         sidebarLineToTree = [];
+        sidebarLineToRow = [];
+        sidebarTabSpans = [];
+        sidebarTabLine = null;
       }
       // Ordered by importance — narrow terminals truncate from the right.
       hints =
-        "→ open · ↵ attach · / search · s similar · n new · r rename · ± zoom · S sidebar · q quit ";
+        `→ open · ↵ attach · / search · m folder · ${FOLDER_UX_INFO[folderView.ux].hint} · s similar · n new · r rename · F folder-ux · ± zoom · S sidebar · q quit `;
     } else {
       body = renderTreeBody(view);
       // The selected row explains what ⏎ does there; keep the bar terse and
@@ -966,6 +1053,9 @@ export async function runApp(): Promise<void> {
         "forest   o=jump to attention  0=fit all  r/L=rename tree",
         "forest   A/ctrl+x=archive/unarchive tree  .=show/hide archived",
         "forest   s=similar conversations (semantic neighbors of the selection)",
+        "folders  m=file the tree in a folder  F=cycle the folder layout (4 to try)",
+        "folders  tree: f/←=fold →=unfold · drill: →=enter ←=up · tabs: </> 1-9 f",
+        "folders  chips: f=filter · r on a folder row renames it · n files into the open folder",
         "tree     j/k=move  ↵/→ = attach at a ● tip (an agent lives there), or grow",
         "tree     a branch: after a reply — or BESIDE a question (it stays out)",
         "tree     f=flow (one branch's conversation) ⇄ full tree",
@@ -1124,7 +1214,7 @@ export async function runApp(): Promise<void> {
       return;
     }
     // The row is about to leave the list — pick the selection's landing spot now.
-    const order = sidebarOrder(sidebarRows(conversations()));
+    const order = listOrder();
     const idx = order.indexOf(treeId);
     for (const m of members) {
       const res = await client.request({
@@ -1176,6 +1266,309 @@ export async function runApp(): Promise<void> {
     showToast(opts.spawn ? "new branch — agent running in parallel" : "new branch (dormant)");
     if (mode.kind === "tree") rebuildConv(); // cursor stays on the branch point
     requestRender();
+  }
+
+  /* -------------------------------- folders -------------------------------- */
+
+  /** File every member of a conversation under `folder` (null unfiles). */
+  async function setConversationFolder(treeId: string, folder: string | null): Promise<boolean> {
+    for (const m of familyMembers(treeId)) {
+      const res = await client.request({
+        t: "set_folder",
+        id: client.rid(),
+        treeId: m.treeId,
+        folder,
+      });
+      if (!res.ok) {
+        showToast(`folder failed: ${res.err}`);
+        return false;
+      }
+    }
+    return true;
+  }
+
+  /**
+   * The tree the folder actions target: the selection, unless the cursor
+   * is on a folder row (then there is none — say so rather than act on a
+   * tree the user can't see highlighted).
+   */
+  function targetTree(): string | null {
+    if (cursorFolder || !selectedId) {
+      showToast(cursorFolder ? "that's a folder — pick a tree first" : "select a tree first (↑/↓ or click)");
+      return null;
+    }
+    return selectedId;
+  }
+
+  /** After a row leaves the view (moved out of scope), land the cursor nearby. */
+  function landCursorAfter(order: string[], idx: number, gone: string): void {
+    if (selectedId !== gone || listOrder().includes(gone)) return;
+    selectedId = order[idx + 1] ?? order[idx - 1] ?? null;
+  }
+
+  /**
+   * `m`: file the selected conversation. A menu of the folders that exist
+   * (with counts), plus "new folder…" and, when filed, "unfile".
+   */
+  function moveToFolderFlow(): void {
+    if (mode.kind !== "forest") return;
+    const treeId = targetTree();
+    if (!treeId) return;
+    const t = forest.get(treeId);
+    if (!t) return;
+    const current = normalizeFolder(t.folder);
+    const idx = folderIndex(allConversations());
+    const paths = idx.paths;
+    const options = paths.map((p) => {
+      const n = idx.byPath.get(p)!;
+      const mark = p === current ? "● " : "  ";
+      const indent = "  ".repeat(n.depth);
+      return `${mark}${indent}${n.name} \x1b[${MUTED}m${n.total}\x1b[0m`;
+    });
+    options.push("  + new folder…");
+    if (current) options.push("  − unfile (no folder)");
+    overlay = {
+      kind: "menu",
+      title: `file ${truncateStr(treeTitle(t).title, 40)}${current ? ` \x1b[${MUTED}m[${current}]\x1b[0m` : ""}`,
+      options,
+      selected: Math.max(0, current ? paths.indexOf(current) : paths.length),
+      onPick: (i) => {
+        if (i < paths.length) {
+          void fileConversation(treeId, paths[i]!);
+        } else if (i === paths.length) {
+          newFolderFlow(treeId);
+        } else {
+          void fileConversation(treeId, null);
+        }
+      },
+    };
+    requestRender();
+  }
+
+  /** "new folder…": type a path; the folder in view is the default parent. */
+  function newFolderFlow(treeId: string): void {
+    const parent = folderForNewTree(folderView);
+    overlay = {
+      kind: "input",
+      title: `new folder${parent ? ` under ${parent}` : ""} (a/b nests)`,
+      value: "",
+      placeholder: parent ? `name — or /name for a top-level folder` : "name — e.g. work/auth",
+      onSubmit: (raw) => {
+        if (!raw) return;
+        const abs = raw.startsWith("/");
+        const path = normalizeFolder(abs || !parent ? raw : `${parent}/${raw}`);
+        if (!path) return;
+        void fileConversation(treeId, path);
+      },
+    };
+    requestRender();
+  }
+
+  async function fileConversation(treeId: string, folder: string | null): Promise<void> {
+    const t = forest.get(treeId);
+    const order = listOrder();
+    const idx = order.indexOf(treeId);
+    if (!(await setConversationFolder(treeId, folder))) return;
+    if (folder) folderView.collapsed.delete(folder); // show where it went
+    showToast(
+      folder
+        ? `filed ${t ? treeTitle(t).title : treeId} under ${folder}`
+        : `unfiled ${t ? treeTitle(t).title : treeId}`,
+    );
+    landCursorAfter(order, idx, treeId);
+    requestRender();
+  }
+
+  /** `r` on a folder row: rename it — every tree under it moves along. */
+  function renameFolderFlow(path: string): void {
+    overlay = {
+      kind: "input",
+      title: `rename folder: ${truncateStr(path, 40)}`,
+      value: "",
+      placeholder: "new path (a/b nests) — empty keeps it",
+      onSubmit: (raw) => {
+        const next = normalizeFolder(raw);
+        if (!next || next === path) return;
+        void (async () => {
+          const moved = allConversations().filter((t) => inFolder(normalizeFolder(t.folder), path));
+          for (const t of moved) {
+            const f = normalizeFolder(t.folder)!;
+            const rel = f === path ? "" : f.slice(path.length);
+            if (!(await setConversationFolder(t.treeId, next + rel))) return;
+          }
+          // Follow the folder wherever the layout was looking at it.
+          if (folderView.collapsed.delete(path)) folderView.collapsed.add(next);
+          if (folderView.cwd && inFolder(folderView.cwd, path)) folderView.cwd = next + folderView.cwd.slice(path.length);
+          if (folderView.tab && inFolder(folderView.tab, path)) folderView.tab = next + folderView.tab.slice(path.length);
+          if (folderView.filter && inFolder(folderView.filter, path)) folderView.filter = next + folderView.filter.slice(path.length);
+          if (cursorFolder === path) cursorFolder = next;
+          saveFolderUi();
+          showToast(`renamed ${path} → ${next}`);
+          requestRender();
+        })();
+      },
+    };
+    requestRender();
+  }
+
+  /** F: the next folder layout. Scope resets so nothing is left invisible. */
+  function cycleFolderUx(dir: 1 | -1 = 1): void {
+    folderView.ux = nextFolderUx(folderView.ux, dir);
+    folderView.cwd = null;
+    folderView.tab = null;
+    folderView.filter = null;
+    cursorFolder = null;
+    saveFolderUi();
+    const i = ["tree", "drill", "tabs", "chips"].indexOf(folderView.ux) + 1;
+    const info = FOLDER_UX_INFO[folderView.ux];
+    showToast(`folders ${i}/4 — ${info.title}: ${info.blurb}`);
+    requestRender();
+  }
+
+  /** The folder the selected row belongs to (its own row, or the tree's folder). */
+  function folderAtCursor(): string | null {
+    if (cursorFolder) return cursorFolder;
+    const t = selectedId ? forest.get(selectedId) : undefined;
+    return normalizeFolder(t?.folder);
+  }
+
+  /** tree layout: fold/unfold a folder, putting the cursor on its row. */
+  function toggleFold(path: string): void {
+    if (folderView.collapsed.has(path)) folderView.collapsed.delete(path);
+    else folderView.collapsed.add(path);
+    cursorFolder = path;
+    saveFolderUi();
+    requestRender();
+  }
+
+  /** drill layout: step into a folder; the cursor lands on its first row. */
+  function enterFolder(path: string | null): void {
+    folderView.cwd = path;
+    cursorFolder = null;
+    const keys = sidebarKeys(currentRows());
+    const first = keys.find((k) => folderOfKey(k) === null) ?? keys[0];
+    if (first) setCursor(first);
+    camera = fitCamera(conversations(), forestVp());
+    requestRender();
+  }
+
+  /** drill layout: `←` — up one level, cursor on the folder just left. */
+  function leaveFolder(): void {
+    if (folderView.cwd === null) return;
+    const from = folderView.cwd;
+    folderView.cwd = folderParent(from);
+    cursorFolder = from;
+    camera = fitCamera(conversations(), forestVp());
+    requestRender();
+  }
+
+  /** tabs layout: switch tab (by index or by stepping); keeps a valid cursor. */
+  function switchTab(next: string | null): void {
+    folderView.tab = next;
+    cursorFolder = null;
+    if (!selectedId || !listOrder().includes(selectedId)) selectedId = listOrder()[0] ?? null;
+    camera = fitCamera(conversations(), forestVp());
+    requestRender();
+  }
+
+  function stepTab(dir: 1 | -1): void {
+    const specs = tabSpecs(allConversations());
+    const i = specs.findIndex((sp) => sp.tab === folderView.tab);
+    const n = specs.length;
+    switchTab(specs[((i < 0 ? 0 : i) + dir + n) % n]!.tab);
+  }
+
+  /** chips layout: set the filter; drill/tabs: jump to a folder by name. */
+  function pickFolderFlow(): void {
+    const idx = folderIndex(allConversations());
+    const paths = idx.paths;
+    if (paths.length === 0) {
+      showToast("no folders yet — m files the selected tree in one");
+      return;
+    }
+    const active = scopeFolder(folderView) ?? null;
+    const isTabs = folderView.ux === "tabs";
+    const options = [
+      `${active === null ? "● " : "  "}all`,
+      ...paths.map((p) => {
+        const n = idx.byPath.get(p)!;
+        const dots = n.attention ? ` \x1b[1;38;5;44m●${n.attention}\x1b[0m` : "";
+        return `${p === active ? "● " : "  "}${"  ".repeat(n.depth)}${n.name} \x1b[${MUTED}m${n.total}\x1b[0m${dots}`;
+      }),
+    ];
+    overlay = {
+      kind: "menu",
+      title: folderView.ux === "chips" ? "filter by folder" : "go to folder",
+      options,
+      selected: active === null ? 0 : paths.indexOf(active) + 1,
+      onPick: (i) => {
+        const path = i === 0 ? null : paths[i - 1]!;
+        if (folderView.ux === "chips") {
+          folderView.filter = path;
+          cursorFolder = null;
+          if (!selectedId || !listOrder().includes(selectedId)) selectedId = listOrder()[0] ?? null;
+          camera = fitCamera(conversations(), forestVp());
+          requestRender();
+        } else if (isTabs) {
+          // Tabs are top-level; a nested pick lands on its top-level tab.
+          switchTab(path ? path.split("/")[0]! : null);
+        } else if (folderView.ux === "drill") {
+          enterFolder(path);
+        } else if (path) {
+          folderView.collapsed.delete(path);
+          cursorFolder = path;
+          saveFolderUi();
+          requestRender();
+        }
+      },
+    };
+    requestRender();
+  }
+
+  /** ⏎/→/f on a folder row: what "opening" it means in the current layout. */
+  function activateFolder(path: string): void {
+    if (folderView.ux === "tree") toggleFold(path);
+    else if (folderView.ux === "drill") enterFolder(path);
+  }
+
+  /** `←` in the forest: fold (tree) or go up (drill); nothing elsewhere. */
+  function forestLeft(): void {
+    if (folderView.ux === "drill") return leaveFolder();
+    if (folderView.ux !== "tree") return;
+    // On a folder: fold it if open, else climb to its parent. On a tree:
+    // fold the folder it sits in (nvim-tree's h) — unfiled trees stay put.
+    if (cursorFolder) {
+      if (!folderView.collapsed.has(cursorFolder)) return toggleFold(cursorFolder);
+      const parent = folderParent(cursorFolder);
+      if (parent) {
+        cursorFolder = parent;
+        requestRender();
+      }
+      return;
+    }
+    const f = folderAtCursor();
+    if (f) toggleFold(f);
+  }
+
+  /** `f` in the forest: the layout's own folder verb. */
+  function forestFolderKey(): void {
+    if (folderView.ux === "tree") {
+      const f = folderAtCursor();
+      if (f) toggleFold(f);
+      else showToast("not in a folder — m files it in one");
+      return;
+    }
+    pickFolderFlow();
+  }
+
+  /**
+   * Folder rows the cursor sat on can vanish (last tree moved out, layout
+   * changed); don't leave the cursor pointing at nothing.
+   */
+  function reconcileCursor(): void {
+    if (cursorFolder && !sidebarKeys(currentRows()).includes(folderKey(cursorFolder))) {
+      cursorFolder = null;
+    }
   }
 
   /* ------------------------------ attach/detach ---------------------------- */
@@ -1315,6 +1708,7 @@ export async function runApp(): Promise<void> {
       const root = familyRootId(selectedId);
       if (root !== selectedId && forest.has(root)) selectedId = root;
     }
+    reconcileCursor();
     // Tips read live status straight from these summaries.
     if (mode.kind === "tree") rebuildConv();
     requestRender();
@@ -1379,32 +1773,51 @@ export async function runApp(): Promise<void> {
 
   /* ------------------------------ interactions ----------------------------- */
 
-  /** One canonical ordering everywhere: the sidebar's visible list order. */
-  function listOrder(): string[] {
-    return sidebarOrder(sidebarRows(conversations()));
+  /** The sidebar's rows under the current folder layout. */
+  function currentRows(): SidebarRow[] {
+    return folderRows(conversations(), folderView);
   }
 
+  /** One canonical ordering everywhere: the sidebar's visible list order. */
+  function listOrder(): string[] {
+    return sidebarOrder(currentRows());
+  }
 
-  /** Move the selection through the sidebar's list order (no wrap). */
+  /**
+   * Move the cursor through the sidebar's rows (no wrap) — trees AND folder
+   * rows, so a folder can be folded, entered or renamed from the keyboard.
+   */
   function stepSidebarSelection(dir: 1 | -1): void {
-    const order = sidebarOrder(sidebarRows(conversations()));
-    if (order.length === 0) return;
-    const idx = order.indexOf(selectedId ?? "");
+    const keys = sidebarKeys(currentRows());
+    if (keys.length === 0) return;
+    const idx = keys.indexOf(cursorKey() ?? "");
     const next =
       idx < 0
         ? dir === 1
           ? 0
-          : order.length - 1
-        : Math.max(0, Math.min(order.length - 1, idx + dir));
-    selectedId = order[next]!;
+          : keys.length - 1
+        : Math.max(0, Math.min(keys.length - 1, idx + dir));
+    setCursor(keys[next]!);
+    requestRender();
+  }
+
+  /** Put the list cursor on a row by key: a tree id or "folder:<path>". */
+  function setCursor(key: string): void {
+    const folder = folderOfKey(key);
+    if (folder !== null) {
+      cursorFolder = folder;
+      return;
+    }
+    cursorFolder = null;
+    selectedId = key;
     const t = forest.get(selectedId);
     if (t) camera = ensureVisible(camera, forestVp(), t.x, t.y);
-    requestRender();
   }
 
   function cycleSelection(dir: 1 | -1 = 1): void {
     // Tab walks the SAME order the sidebar displays, wrapping at the ends —
-    // what you see is what you cycle.
+    // what you see is what you cycle. Trees only: folders aren't targets.
+    cursorFolder = null;
     const orderList = listOrder();
     if (orderList.length === 0) return;
     const idx = orderList.indexOf(selectedId ?? "");
@@ -1417,6 +1830,7 @@ export async function runApp(): Promise<void> {
   }
 
   function jumpToAttention(): void {
+    cursorFolder = null;
     // The top of the list IS the most attention-worthy tree.
     const targetId = listOrder()[0];
     const target = targetId ? forest.get(targetId) : undefined;
@@ -1444,6 +1858,16 @@ export async function runApp(): Promise<void> {
         showToast(`spawn failed: ${res.err ?? "no tree id"}`);
         return;
       }
+      // A tree made while looking at a folder belongs to that folder —
+      // otherwise it would land outside the view that just created it.
+      const into = folderForNewTree(folderView);
+      if (into) {
+        const filed = await client
+          .request({ t: "set_folder", id: client.rid(), treeId: res.newTreeId, folder: into })
+          .catch(() => ({ ok: false, err: "timeout" }));
+        if (!filed.ok) showToast(`new tree not filed under ${into}: ${filed.err ?? "unknown error"}`);
+      }
+      cursorFolder = null;
       selectedId = res.newTreeId;
       const rec = forest.get(res.newTreeId);
       if (rec) camera = { ...camera, cx: rec.x, cy: rec.y };
@@ -1511,11 +1935,16 @@ export async function runApp(): Promise<void> {
         else cycleSelection(1);
         return;
       case "\x1b[C":
+        if (cursorFolder) return activateFolder(cursorFolder);
         if (selectedId) void openTree(selectedId);
         return;
       case "\x1b[D":
-        return; // already at the root of the hierarchy
+        // The folder in view is a level of the hierarchy: ← climbs out of
+        // it (drill) or folds it (tree). At the top there is nowhere to go.
+        forestLeft();
+        return;
       case "\r":
+        if (cursorFolder) return activateFolder(cursorFolder);
         // Claude Agents muscle memory: Enter jumps straight into the session.
         if (selectedId) attachConversation(selectedId);
         return;
@@ -1564,28 +1993,59 @@ export async function runApp(): Promise<void> {
       case "o":
         jumpToAttention();
         return;
-      case "a":
-        if (selectedId) attachConversation(selectedId);
+      case "a": {
+        const t = targetTree();
+        if (t) attachConversation(t);
         return;
+      }
       case "n":
         void newTreeFlow();
         return;
+      case "m":
+        moveToFolderFlow();
+        return;
+      case "f":
+        forestFolderKey();
+        return;
+      case "F":
+        cycleFolderUx();
+        return;
+      case "<":
+      case ">":
+        if (folderView.ux === "tabs") stepTab(key === ">" ? 1 : -1);
+        else showToast("</> switch tabs in the tabs layout (F cycles layouts)");
+        return;
+      case "1":
+      case "2":
+      case "3":
+      case "4":
+      case "5":
+      case "6":
+      case "7":
+      case "8":
+      case "9": {
+        if (folderView.ux !== "tabs") return;
+        const spec = tabSpecs(allConversations())[Number(key) - 1];
+        if (spec) switchTab(spec.tab);
+        return;
+      }
       case "/":
         openSearch();
         return;
       case "s":
-        void openSimilar();
+        if (targetTree()) void openSimilar();
         return;
       case "?":
         openHelp();
         return;
       case "r":
       case "L":
+        if (cursorFolder) return renameFolderFlow(cursorFolder);
         void renameTreeFlow();
         return;
       case "A":
       case "\x18": // Ctrl+X — Claude Agents muscle memory for archive
-        void archiveFlow();
+        if (targetTree()) void archiveFlow();
         return;
       case ".": {
         showArchived = !showArchived;
@@ -1601,16 +2061,17 @@ export async function runApp(): Promise<void> {
         showToast("relayout requested");
         return;
       case "x": {
-        if (!selectedId) return;
-        const live = familyMembers(selectedId).filter((m) => m.live);
+        const victimTree = targetTree();
+        if (!victimTree) return;
+        const live = familyMembers(victimTree).filter((m) => m.live);
         if (live.length === 0) {
           showToast("no live agent in this conversation");
           return;
         }
         const victim = attentionMemberOf(live);
         client.send({ t: "kill_agent", treeId: victim.treeId });
-        const kt = forest.get(selectedId);
-        showToast(`killed agent of ${kt ? treeTitle(kt).title : selectedId}`);
+        const kt = forest.get(victimTree);
+        showToast(`killed agent of ${kt ? treeTitle(kt).title : victimTree}`);
         return;
       }
       default:
@@ -1923,8 +2384,30 @@ export async function runApp(): Promise<void> {
     if (ev.kind === "wheel-up") return stepSidebarSelection(-1);
     if (ev.kind === "wheel-down") return stepSidebarSelection(1);
     if (ev.kind !== "press" || ev.button !== 0) return;
+    const row = sidebarLineToRow[ev.y] ?? null;
+    // Folder chrome: a tab, a folder row (click selects, again opens), the
+    // up row, or a filter header (click clears the filter).
+    if (row?.kind === "tabs" && sidebarTabLine === ev.y) {
+      const hit = sidebarTabSpans.find((sp) => ev.x >= sp.x0 && ev.x <= sp.x1);
+      if (hit) switchTab(hit.tab);
+      return;
+    }
+    if (row?.kind === "up") return leaveFolder();
+    if (row?.kind === "header" && row.folder && folderView.ux === "chips") {
+      folderView.filter = null;
+      camera = fitCamera(conversations(), forestVp());
+      requestRender();
+      return;
+    }
+    if (row?.kind === "folder" && row.folder) {
+      if (cursorFolder === row.folder) return activateFolder(row.folder);
+      cursorFolder = row.folder;
+      requestRender();
+      return;
+    }
     const treeId = sidebarLineToTree[ev.y] ?? null;
     if (!treeId) return;
+    cursorFolder = null;
     const now = Date.now();
     if (
       lastClick &&
