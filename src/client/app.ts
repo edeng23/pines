@@ -56,6 +56,7 @@ import {
 } from "@earendil-works/pi-tui";
 
 import { loadConfig, prefixByte } from "../shared/config.js";
+import { DEFAULT_LAYOUT, LAYOUT_STRATEGIES, type LayoutStrategy } from "../layout/strategies.js";
 import {
   BELL,
   buildToastSeq,
@@ -226,6 +227,8 @@ export async function runApp(): Promise<void> {
   const client = await DaemonClient.connect(attachSize());
   const forest = new Map<string, TreeSummary>();
   for (const t of client.helloOk.forest) forest.set(t.treeId, t);
+  /** Layout strategy the daemon is using (experimental comparison switch). */
+  let layout: LayoutStrategy = client.helloOk.layout ?? DEFAULT_LAYOUT;
 
   // Mascot header facts: our version, the bundled pi's, and where state
   // lives — shortened to ~ like a shell prompt.
@@ -777,6 +780,37 @@ export async function runApp(): Promise<void> {
     return "▰".repeat(filled) + "▱".repeat(4 - filled);
   }
 
+  /** Lay the forest out again — with `strategy` if given, else the current one. */
+  async function relayout(strategy?: LayoutStrategy): Promise<void> {
+    const res = await client.request({ t: "relayout", id: client.rid(), layout: strategy });
+    if (!res.ok) {
+      showToast(`relayout failed: ${res.err ?? "unknown error"}`);
+      return;
+    }
+    if (res.layout) layout = res.layout;
+    showToast(`relayout (${layout})`);
+  }
+
+  /**
+   * EXPERIMENTAL: the layout comparison switch. Picks one of the candidate
+   * strategies and lays the forest out with it; the daemon remembers the
+   * choice. Here so the options can be judged on a real forest.
+   */
+  function openLayoutPicker(): void {
+    overlay = {
+      kind: "menu",
+      title: "forest layout (experimental — pick one; R redoes it)",
+      options: LAYOUT_STRATEGIES.map((s) => `${s.id === layout ? "▸" : " "} ${s.name}`),
+      detail: LAYOUT_STRATEGIES.map((s) => [`\x1b[${MUTED}m${s.blurb}\x1b[0m`]),
+      selected: Math.max(0, LAYOUT_STRATEGIES.findIndex((s) => s.id === layout)),
+      onPick: (i) => {
+        const s = LAYOUT_STRATEGIES[i];
+        if (s) void relayout(s.id);
+      },
+    };
+    requestRender();
+  }
+
   async function openSimilar(): Promise<void> {
     if (!selectedId) return;
     const treeId = selectedId;
@@ -962,7 +996,7 @@ export async function runApp(): Promise<void> {
         "arrows   ↑/↓ select · → go deeper (forest→tree→pi) · ← go back up",
         "sidebar  S=toggle  [/]=width  drag divider=resize  ↵/dbl-click=attach",
         "forest   wheel/±=zoom  drag/hjkl=pan  click/tab=select  ↵=attach",
-        "forest   a=attach  n=new tree + attach  x=kill agent  R=relayout",
+        "forest   a=attach  n=new tree + attach  x=kill agent  R=relayout  g=layout",
         "forest   o=jump to attention  0=fit all  r/L=rename tree",
         "forest   A/ctrl+x=archive/unarchive tree  .=show/hide archived",
         "forest   s=similar conversations (semantic neighbors of the selection)",
@@ -1597,8 +1631,10 @@ export async function runApp(): Promise<void> {
         return;
       }
       case "R":
-        client.send({ t: "relayout", id: client.rid() });
-        showToast("relayout requested");
+        void relayout();
+        return;
+      case "g":
+        openLayoutPicker();
         return;
       case "x": {
         if (!selectedId) return;
