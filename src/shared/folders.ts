@@ -39,29 +39,3 @@ export function inFolder(folder: string | null | undefined, scope: string): bool
   if (!folder) return false;
   return folder === scope || folder.startsWith(scope + "/");
 }
-
-/** Tabs mode: the tab that shows only unfiled trees (never a real path). */
-export const UNFILED_TAB = "\0unfiled";
-
-/**
- * What a list row's right-hand chip should say for a tree: its folder
- * (relative to the folder in view, so "work/auth" under "work" reads
- * "auth"; nothing when the folder is exactly the one in view), else the
- * directory basename. `chipBase === undefined` means "folders are not
- * shown as chips here" (the tree and drill layouts, where context says it).
- */
-export function rowChip(
-  t: { folder?: string | null; cwd: string | null },
-  chipBase: string | null | undefined,
-): string {
-  const f = normalizeFolder(t.folder);
-  if (f && chipBase !== undefined) {
-    if (chipBase && chipBase !== UNFILED_TAB && inFolder(f, chipBase)) {
-      const rel = f === chipBase ? "" : f.slice(chipBase.length + 1);
-      if (rel) return rel;
-    } else {
-      return f;
-    }
-  }
-  return t.cwd ? t.cwd.slice(t.cwd.lastIndexOf("/") + 1) : "";
-}

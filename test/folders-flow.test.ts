@@ -1,8 +1,8 @@
 /**
  * User-facing smoke test for folders: file a tree from the forest (`m` →
- * new folder), see it under a folder section, and cycle all four folder
- * layouts with `F` — each must draw its own chrome and keep the tree
- * reachable. Drives the real TUI through a pty against a real daemon.
+ * new folder), see it nested under its folder sections, fold and unfold
+ * them, and rename the folder from its row. Drives the real TUI through a
+ * pty against a real daemon.
  */
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
@@ -59,7 +59,7 @@ afterAll(() => {
 });
 
 describe("folders in the forest", () => {
-  it("files a tree with m, then cycles tree → drill → tabs → chips with F", async () => {
+  it("files a tree with m, folds and unfolds its folder, renames it from the row", async () => {
     ensureNodePtyReady();
     const COLS = 110;
     const ROWS = 32;
@@ -109,32 +109,12 @@ describe("folders in the forest", () => {
     app.write("\x1b[C");
     await waitFor(() => has("▾ auth"), 5000, "auth unfolded");
 
-    // F → drill: top level shows the folder as an enterable row.
-    app.write("F");
-    await waitFor(() => has("folders 2/4") && has("▸ work"), 5000, "drill layout");
-    // Cursor to the folder row (it is the first row) and → enters it.
-    app.write("\x1b[A\x1b[A\x1b[A\x1b[A\x1b[A\x1b[A");
-    app.write("\x1b[C");
-    await waitFor(() => has("forest ▸ work") && has("◂ .."), 5000, "inside work");
-    app.write("\x1b[D");
-    await waitFor(() => !has("forest ▸ work"), 5000, "back at the top level");
-
-    // F → tabs: the strip with all / work / unfiled; > switches to work.
-    app.write("F");
-    await waitFor(() => has("folders 3/4") && has("all") && has("│ work") && has("unfiled"), 5000, "tabs layout");
-    app.write(">");
-    await waitFor(() => has("forest ▸ work"), 5000, "work tab");
-    app.write("<");
-    await waitFor(() => !has("forest ▸ work"), 5000, "all tab");
-
-    // F → chips: flat list, the folder rides on the row as a chip.
-    app.write("F");
-    await waitFor(() => has("folders 4/4"), 5000, "chips layout");
-    await waitFor(() => screen().some((l) => l.includes("work/auth") && !l.includes("folders 4/4")), 5000, "folder chip");
-
-    // F wraps back to tree.
-    app.write("F");
-    await waitFor(() => has("folders 1/4"), 5000, "tree again");
+    // Folding put the cursor on the folder row itself; r there renames it.
+    app.write("r");
+    await waitFor(() => has("rename folder: work/auth"), 5000, "rename prompt");
+    app.write("work/sessions\r");
+    await waitFor(() => has("renamed work/auth"), 5000, "rename toast");
+    await waitFor(() => has("▾ sessions") && !has("▾ auth"), 5000, "renamed section");
 
     const exited = new Promise<void>((resolve) => app.onExit(() => resolve()));
     app.write("q");

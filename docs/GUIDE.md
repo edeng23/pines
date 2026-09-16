@@ -75,8 +75,8 @@ share one selection: moving in the list pans the camera only when the tree is
 off-screen. `S` toggles the sidebar, `[`/`]` resize it, or drag the divider;
 width and visibility persist in `~/.pines/ui.json`.
 
-Trees can be filed into **folders** (`m`), and the sidebar has four layouts
-for them — `F` cycles through them. See [Folders](#folders) below.
+Trees can be filed into **folders** (`m`): collapsible sections of the
+sidebar. See [Folders](#folders) below.
 
 The canvas draws the **canopy** — a forester's plat: sunlit pines on graph
 paper, lineage surveyed in right angles. A tree grows with the conversation
@@ -126,7 +126,7 @@ and a first run — all placed by the same layout the daemon uses.
 
 | view | keys / mouse |
 |---|---|
-| forest | `↑`/`↓` move through the sidebar list · `Enter` attach · `→` open tree view · wheel = zoom at cursor · drag = pan · click = select · double-click = open (canvas) / attach (sidebar) · `hjkl` pan · `+`/`-` zoom · `0` fit · `Tab` cycle by attention · `o` jump to most urgent · `a` attach · `n` new tree and attach · `r`/`L` rename tree (or the folder under the cursor) · `m` file in a folder · `f` the layout's folder verb (fold / go to / switch / filter) · `F` cycle the folder layout · `<`/`>` `1`-`9` switch folder tabs (tabs layout) · `←` fold / leave folder · `A`/`Ctrl+X` archive/unarchive · `.` show/hide archived · `S` sidebar · `[`/`]` sidebar width · `x` kill agent · `R` relayout · `s` similar conversations · `/` search · `?` help |
+| forest | `↑`/`↓` move through the sidebar list · `Enter` attach · `→` open tree view · wheel = zoom at cursor · drag = pan · click = select · double-click = open (canvas) / attach (sidebar) · `hjkl` pan · `+`/`-` zoom · `0` fit · `Tab` cycle by attention · `o` jump to most urgent · `a` attach · `n` new tree and attach · `r`/`L` rename tree (or the folder under the cursor) · `m` file in a folder · `f`/`←` fold the folder at the cursor · `→`/`Enter` on a folder row unfold · `A`/`Ctrl+X` archive/unarchive · `.` show/hide archived · `S` sidebar · `[`/`]` sidebar width · `x` kill agent · `R` relayout · `s` similar conversations · `/` search · `?` help |
 | tree | `↑`/`↓` or `j`/`k` move · `→`/`Enter` — on a tip (a node showing an agent's status): attach to that branch's agent (resume if dormant); on a `⋯` row: expand; on a `[+]` row: unfold; on any other message: grow a new branch there with its own agent and attach (from a question: *beside* it — the question stays out) · `f` flow (one branch's conversation) ⇄ full tree · `Tab`/`Shift+Tab` next/prev branch · `1`-`9` jump to a branch tip · `←`/`Esc` back to the forest · `b` branch menu (with/without agent) · `L` label · `r` rename tree · `/` search |
 | attached pi | everything goes to pi, except the prefix `Ctrl+t`: `←`/`d` = back to tree · `f` = forest · `n` = next attention target · `Ctrl+t Ctrl+t` = send a literal Ctrl+t |
 
@@ -200,22 +200,41 @@ the menu, `+ new folder…` to type a path (`work/auth` nests; under an open
 folder a bare name nests inside it, a leading `/` makes it top-level), or
 `− unfile`. Filing a conversation files all of its branches. Folders are
 daemon state (they survive restarts and show in every client) and a folder
-lives as long as any tree names it. `n` files a new tree into whichever
-folder is in view.
+lives as long as any tree names it.
 
-The sidebar has **four layouts** for folders, and `F` cycles them — they
-are alternatives under evaluation, not modes to combine; the pick persists
-in `~/.pines/ui.json`. [docs/FOLDERS-UX.md](FOLDERS-UX.md) compares them
-against how other TUIs group things; `pnpm tsx scripts/folders-preview.ts`
-renders all four side by side; `pnpm demo` opens a forest that is already
-filed.
+In the sidebar, folders are **collapsible sections**, nested by path, each
+header carrying its subtree's badges (`●2 ◐1 7`: needs input, working,
+total); a folder's trees sit under it in triage order, one indent step in.
+Unfiled trees follow in the usual state groups, archived trees last. The
+canvas is untouched — folding is a list affair.
 
-| layout | what you see | keys |
-|---|---|---|
-| **tree** (default) | folders as collapsible sections with `●`/`◐`/count badges, trees nested under them, unfiled trees below in the usual state groups | `↑`/`↓` walk folder rows too · `⏎`/`→`/`f` fold/unfold · `←` fold (then climb) · `r` on a folder renames it |
-| **drill** | one level at a time: folders as rows, `◂ ..` inside one; the breadcrumb reads `forest ▸ work ▸ auth` and the canvas narrows to the folder | `→`/`⏎` enter · `←` up · `f` jump to a folder |
-| **tabs** | a strip `all │ work │ side │ unfiled` atop the list; one tab in view, its trees in the classic triage list with subfolder chips | `<`/`>` step · `1`-`9` jump · `f` pick · click a tab |
-| **chips** | the classic list, untouched; each row's chip shows its folder; `f` filters list and canvas to one folder (a `▾ work` header shows it — click to clear) | `f` filter/clear |
+```
+ ▾ side                      ●1 2
+  ● add usage examples        45m
+  · write docs for the wire … 25h
+ ▾ work                   ●1 ◐1 5
+  ○ migrate the sqlite schema 30m
+  ▾ auth                     ●1 2
+   ● add oauth token refresh   3m
+  ▸ perf                     ◐1 2
+ unfiled
+ ◐ review this diff      pines 8m
+```
+
+- `↑`/`↓` walk folder rows as well as trees. On a folder row: `⏎`/`→`
+  unfold (or fold), `←`/`f` fold — and `←` on an already-folded folder
+  climbs to its parent; `r` renames the folder (everything beneath moves
+  along); `n` starts a new tree filed in it. On a tree: `f` or `←` folds
+  the folder it sits in.
+- Clicking a folder row selects it; a second click folds/unfolds.
+- Folds persist in `~/.pines/ui.json`. `Tab`/`o` attention cycling walks
+  trees only — folders are structure, never targets.
+
+`pnpm tsx scripts/folders-preview.ts` renders the sidebar with folders from
+a fixed forest, and `pnpm demo` opens a sandbox that is already filed.
+This layout was picked over a drill-down, a tab strip and a flat
+chips-plus-filter list after trying all four; [docs/FOLDERS-UX.md](FOLDERS-UX.md)
+records the alternatives and the survey of other TUIs behind them.
 
 ## Semantic layout
 

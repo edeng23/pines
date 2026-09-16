@@ -11,8 +11,8 @@
  *   pnpm demo --no-agents  # dormant sessions only
  *
  * The generated sessions come pre-filed into folders (projects/<topic>),
- * the live agents deliberately not — so every folder layout (F cycles the
- * four) has folders, nesting and an unfiled group to show.
+ * the live agents deliberately not — so the sidebar has folder sections,
+ * nesting and an unfiled group to show.
  *
  * Everything lives under ~/.pines-demo: its own daemon, socket, database and
  * sessions directory. Your real ~/.pines and ~/.pi are never opened, and
@@ -118,7 +118,7 @@ if (existing === 0) {
 if (existing === 0) await seedFolders();
 
 process.stdout.write(
-  `\x1b[2mdemo forest in ${HOME} — r renames a tree, m files it in a folder, F cycles the folder layouts, ? for keys, q quits\x1b[0m\n`,
+  `\x1b[2mdemo forest in ${HOME} — r renames a tree, m files it in a folder, f folds one, ? for keys, q quits\x1b[0m\n`,
 );
 
 // Hand the terminal over to pines, pointed entirely at the sandbox.

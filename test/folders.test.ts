@@ -1,7 +1,6 @@
 /**
- * Folders: the shared path helpers, the folder index, and the four sidebar
- * layouts (tree / drill / tabs / chips) built from one fixture forest —
- * plus the renderer's folder, up and tab rows.
+ * Folders: the shared path helpers, the folder index, the sidebar's folder
+ * sections built from one fixture forest, and the renderer's folder rows.
  */
 import { describe, expect, it } from "vitest";
 import {
@@ -10,24 +9,17 @@ import {
   folderParent,
   inFolder,
   normalizeFolder,
-  rowChip,
-  UNFILED_TAB,
 } from "../src/shared/folders.js";
 import {
   emptyFolderView,
-  folderForNewTree,
   folderIndex,
   folderKey,
   folderOfKey,
   folderRows,
-  nextFolderUx,
-  scopeTrees,
   sidebarKeys,
-  tabSpecs,
 } from "../src/client/forest/folders.js";
 import {
   renderSidebar,
-  renderTabStrip,
   sidebarOrder,
   sidebarScrollTo,
   type SidebarRow,
@@ -96,15 +88,6 @@ describe("folder paths", () => {
     expect(inFolder(null, "a")).toBe(false);
   });
 
-  it("chips: the folder relative to the one in view, else the directory", () => {
-    const t = { folder: "work/auth", cwd: "/home/x/repo" };
-    expect(rowChip(t, undefined)).toBe("repo"); // layout doesn't show folders as chips
-    expect(rowChip(t, null)).toBe("work/auth"); // nothing in view: full path
-    expect(rowChip(t, "work")).toBe("auth"); // under work: the remainder
-    expect(rowChip({ folder: "work", cwd: "/home/x/repo" }, "work")).toBe("repo"); // implied
-    expect(rowChip({ folder: null, cwd: "/home/x/repo" }, UNFILED_TAB)).toBe("repo");
-  });
-
   it("folder keys round-trip and never collide with tree ids", () => {
     expect(folderOfKey(folderKey("work/auth"))).toBe("work/auth");
     expect(folderOfKey("t_abc")).toBeNull();
@@ -133,36 +116,9 @@ describe("folder index", () => {
   });
 });
 
-describe("scope", () => {
-  it("tree scopes nothing; the others narrow to the folder in focus", () => {
-    const st = emptyFolderView("tree");
-    expect(scopeTrees(FOREST, st)).toHaveLength(FOREST.length);
-    const drill = { ...emptyFolderView("drill"), cwd: "work" };
-    expect(scopeTrees(FOREST, drill).map((t) => t.treeId)).toEqual(["w1", "w2", "wa", "z"]);
-    const tabs = { ...emptyFolderView("tabs"), tab: UNFILED_TAB };
-    expect(scopeTrees(FOREST, tabs).map((t) => t.treeId)).toEqual(["u1", "u2"]);
-    const chips = { ...emptyFolderView("chips"), filter: "work/auth" };
-    expect(scopeTrees(FOREST, chips).map((t) => t.treeId)).toEqual(["wa"]);
-  });
-
-  it("files a new tree into the folder in focus, never into 'unfiled' or 'all'", () => {
-    expect(folderForNewTree(emptyFolderView("tree"))).toBeNull();
-    expect(folderForNewTree({ ...emptyFolderView("drill"), cwd: "work" })).toBe("work");
-    expect(folderForNewTree({ ...emptyFolderView("tabs"), tab: UNFILED_TAB })).toBeNull();
-    expect(folderForNewTree({ ...emptyFolderView("tabs"), tab: null })).toBeNull();
-    expect(folderForNewTree({ ...emptyFolderView("chips"), filter: "side" })).toBe("side");
-  });
-
-  it("cycles the four layouts in order, both ways", () => {
-    expect(nextFolderUx("tree")).toBe("drill");
-    expect(nextFolderUx("chips")).toBe("tree");
-    expect(nextFolderUx("tree", -1)).toBe("chips");
-  });
-});
-
-describe("tree layout", () => {
+describe("folder sections", () => {
   it("folders first (nested, triage order inside), then unfiled in state groups", () => {
-    const st = emptyFolderView("tree");
+    const st = emptyFolderView();
     const rows = folderRows(FOREST, st);
     expect(kinds(rows)).toEqual([
       "folder:side",
@@ -191,7 +147,7 @@ describe("tree layout", () => {
   });
 
   it("a folded folder hides its trees and subfolders", () => {
-    const st = emptyFolderView("tree");
+    const st = emptyFolderView();
     st.collapsed.add("work");
     const rows = folderRows(FOREST, st);
     expect(kinds(rows)).toEqual([
@@ -208,7 +164,7 @@ describe("tree layout", () => {
   });
 
   it("shows archived trees in their own bottom group when present", () => {
-    const rows = folderRows(FOREST, emptyFolderView("tree"));
+    const rows = folderRows(FOREST, emptyFolderView());
     // z is archived: it is not listed under work (folderIndex skips it) and,
     // being in the input, lands in the archived group after the unfiled ones.
     expect(kinds(rows).at(-1)).toBe("tree:z");
@@ -216,84 +172,8 @@ describe("tree layout", () => {
   });
 
   it("with no folders at all, the list is exactly the classic one", () => {
-    const rows = folderRows([tree("a", null), tree("b", null, { status: "running" })], emptyFolderView("tree"));
+    const rows = folderRows([tree("a", null), tree("b", null, { status: "running" })], emptyFolderView());
     expect(kinds(rows)).toEqual(["header:working", "tree:b", "header:recent", "tree:a"]);
-  });
-});
-
-describe("drill layout", () => {
-  it("top level: folders as rows, then unfiled trees in state groups", () => {
-    const rows = folderRows(scopeTrees(FOREST, emptyFolderView("drill")), emptyFolderView("drill"));
-    expect(kinds(rows)).toEqual(["folder:side", "folder:work", "header:recent", "tree:u1", "tree:u2"]);
-    // Drill folders are always "enterable" (caret ▸), never nested inline.
-    expect(rows[0]!.collapsed).toBe(true);
-    expect(rows[1]!.depth).toBe(0);
-  });
-
-  it("inside a folder: an up row, subfolders, then the trees filed right here", () => {
-    const st = { ...emptyFolderView("drill"), cwd: "work" };
-    const rows = folderRows(scopeTrees(FOREST, st), st);
-    expect(kinds(rows)).toEqual([
-      "up:work", // the row names where you are; its target (folder) is the parent
-      "folder:work/auth",
-      "header:needs input",
-      "tree:w1",
-      "header:recent",
-      "tree:w2",
-      "header:archived",
-      "tree:z",
-    ]);
-    expect(rows[0]!.folder).toBeNull();
-    const deeper = { ...emptyFolderView("drill"), cwd: "work/auth" };
-    const rows2 = folderRows(scopeTrees(FOREST, deeper), deeper);
-    expect(rows2[0]).toMatchObject({ kind: "up", folder: "work" });
-    expect(kinds(rows2)).toEqual(["up:work", "header:working", "tree:wa"]);
-  });
-});
-
-describe("tabs layout", () => {
-  it("strip: all · top-level folders · unfiled (only when both exist)", () => {
-    const specs = tabSpecs(FOREST);
-    expect(specs.map((s) => s.label)).toEqual(["all", "side", "work", "unfiled"]);
-    expect(specs[0]!.attention).toBe(1);
-    expect(specs[2]).toMatchObject({ tab: "work", attention: 1, working: 1 });
-    expect(specs[3]!.tab).toBe(UNFILED_TAB);
-    // No folders → just "all" (unfiled would be the same list).
-    expect(tabSpecs([tree("a", null)]).map((s) => s.label)).toEqual(["all"]);
-  });
-
-  it("rows: the strip, then the active tab's trees with subfolder chips", () => {
-    const st = { ...emptyFolderView("tabs"), tab: "work" };
-    const rows = folderRows(scopeTrees(FOREST, st), st);
-    expect(rows[0]!.kind).toBe("tabs");
-    expect(sidebarOrder(rows)).toEqual(["w1", "wa", "w2", "z"]);
-    expect(rows.find((r) => r.treeId === "wa")!.chip).toBe("auth"); // relative to the tab
-    expect(rows.find((r) => r.treeId === "w1")!.chip).toBe("repo"); // implied → directory
-    const all = folderRows(FOREST, emptyFolderView("tabs"));
-    expect(all.find((r) => r.treeId === "wa")!.chip).toBe("work/auth"); // full path under "all"
-  });
-
-  it("renders the strip with the active tab inverted and clickable spans", () => {
-    const { line, spans } = renderTabStrip(tabSpecs(FOREST), "work", 60);
-    expect(plain(line)).toBe("  all●1 │ side │ work●1 │ unfiled ");
-    expect(spans.map((s) => s.tab)).toEqual([null, "side", "work", UNFILED_TAB]);
-    // The active tab's span covers its text, and the strip clips to width.
-    const work = spans[2]!;
-    expect(plain(line).slice(work.x0, work.x1 + 1)).toBe(" work●1 ");
-    expect(plain(renderTabStrip(tabSpecs(FOREST), null, 12).line).length).toBeLessThanOrEqual(12);
-  });
-});
-
-describe("chips layout", () => {
-  it("is the classic list with folder chips, plus a header when filtered", () => {
-    const rows = folderRows(FOREST, emptyFolderView("chips"));
-    expect(kinds(rows)[0]).toBe("header:needs input");
-    expect(rows.find((r) => r.treeId === "w1")!.chip).toBe("work");
-    expect(rows.find((r) => r.treeId === "u1")!.chip).toBe("repo");
-    const st = { ...emptyFolderView("chips"), filter: "work" };
-    const filtered = folderRows(scopeTrees(FOREST, st), st);
-    expect(filtered[0]).toMatchObject({ kind: "header", label: "▾ work", folder: "work" });
-    expect(sidebarOrder(filtered)).toEqual(["w1", "wa", "w2", "z"]);
   });
 });
 
@@ -301,7 +181,7 @@ describe("sidebar rendering of folder rows", () => {
   const trees = new Map(FOREST.map((t) => [t.treeId, t]));
 
   it("draws folder, up and tab rows at exact width and maps them for clicks", () => {
-    const st = emptyFolderView("tree");
+    const st = emptyFolderView();
     const rows = folderRows(FOREST, st);
     const out = renderSidebar({
       trees,
@@ -329,31 +209,9 @@ describe("sidebar rendering of folder rows", () => {
     expect(plain(out.lines[w1Line]!).startsWith("  ●")).toBe(true);
   });
 
-  it("drill: the up row is a click target back to the parent", () => {
-    const st = { ...emptyFolderView("drill"), cwd: "work/auth" };
-    const rows = folderRows(scopeTrees(FOREST, st), st);
-    const out = renderSidebar({
-      trees, rows, selectedId: null, width: 30, height: 6, scroll: 0, spinnerFrame: 0, now: 1000,
-    });
-    expect(plain(out.lines[0]!)).toContain("◂ ..  work");
-    expect(out.lineToRow[0]).toMatchObject({ kind: "up", folder: "work" });
-  });
-
-  it("tabs: the strip line reports its spans and screen line", () => {
-    const st = { ...emptyFolderView("tabs"), tab: "side" };
-    const rows = folderRows(scopeTrees(FOREST, st), st);
-    const out = renderSidebar({
-      trees, rows, selectedId: "s1", width: 40, height: 6, scroll: 0, spinnerFrame: 0, now: 1000,
-      tabs: { specs: tabSpecs(FOREST), active: "side" },
-    });
-    expect(out.tabLine).toBe(0);
-    expect(out.tabSpans.map((s) => s.tab)).toEqual([null, "side", "work", UNFILED_TAB]);
-    expect(plain(out.lines[0]!)).toContain("side");
-  });
-
   it("scrolls to keep a folder cursor in view", () => {
     const many = Array.from({ length: 30 }, (_, i) => tree(`t${i}`, `f${String(i).padStart(2, "0")}`));
-    const rows = folderRows(many, emptyFolderView("tree"));
+    const rows = folderRows(many, emptyFolderView());
     const s = sidebarScrollTo(rows, folderKey("f29"), 0, 10);
     expect(s).toBeGreaterThan(0);
     const idx = rows.findIndex((r) => r.kind === "folder" && r.folder === "f29");
