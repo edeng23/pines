@@ -6,11 +6,14 @@ import { uiStatePath } from "../shared/paths.js";
 export interface UiState {
   sidebarVisible: boolean;
   sidebarWidth: number;
+  /** Sidebar folders folded shut, so a tidy list survives a restart. */
+  collapsedFolders: string[];
 }
 
 export const DEFAULT_UI_STATE: UiState = {
   sidebarVisible: true,
   sidebarWidth: 32,
+  collapsedFolders: [],
 };
 
 export function loadUiState(): UiState {
@@ -27,6 +30,9 @@ export function loadUiState(): UiState {
         typeof raw.sidebarWidth === "number" && Number.isFinite(raw.sidebarWidth)
           ? raw.sidebarWidth
           : DEFAULT_UI_STATE.sidebarWidth,
+      collapsedFolders: Array.isArray(raw.collapsedFolders)
+        ? raw.collapsedFolders.filter((f): f is string => typeof f === "string")
+        : [],
     };
   } catch {
     return { ...DEFAULT_UI_STATE };

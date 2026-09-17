@@ -42,7 +42,7 @@ if (process.env.PINES_SOCK && (args.includes("--ext-report") || process.env.FAKE
     send({
       t: "hello",
       role: "extension",
-      protocolVersion: 2, // keep in sync with PROTOCOL_VERSION (dependency-free fixture)
+      protocolVersion: 3, // keep in sync with PROTOCOL_VERSION (dependency-free fixture)
       pid: process.pid,
       treeId: process.env.PINES_TREE_ID ?? "",
       // Real pi reports the session it was resumed on; mirror that when the

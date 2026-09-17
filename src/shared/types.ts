@@ -30,6 +30,11 @@ export interface TreeSummary {
   live: boolean;
   /** Archived trees are hidden from the forest and sidebar by default. */
   archived?: boolean;
+  /**
+   * Folder the tree is filed under: a '/'-separated path ("work/auth"),
+   * or null/absent when unfiled. Set on every member of a conversation.
+   */
+  folder?: string | null;
   mtime: number;
   /** Exit code of the last agent process, if one has exited (crash triage). */
   lastExitCode?: number | null;
