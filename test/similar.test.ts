@@ -177,14 +177,14 @@ describe("schema migration from v1", () => {
     const ver = db.prepare("SELECT value FROM meta WHERE key = 'schema_version'").get() as {
       value: string;
     };
-    expect(ver.value).toBe("3");
+    expect(ver.value).toBe("4");
     db.close();
 
-    db = openDb(path); // reopen: no throw, still v2
+    db = openDb(path); // reopen: no throw, version stays put
     expect(
       (db.prepare("SELECT value FROM meta WHERE key = 'schema_version'").get() as { value: string })
         .value,
-    ).toBe("3");
+    ).toBe("4");
     db.close();
   });
 });

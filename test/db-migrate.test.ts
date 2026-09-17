@@ -1,6 +1,7 @@
 /**
- * Schema migration: a v1 store (no `archived` column) opened by the current
- * code gains the column without losing rows; fresh stores start at the current version.
+ * Schema migration: a v1 store (no `archived`/`folder` columns) opened by the
+ * current code gains the columns without losing rows; fresh stores start at
+ * the current version.
  */
 import { afterAll, describe, expect, it } from "vitest";
 import Database from "better-sqlite3";
@@ -48,7 +49,7 @@ CREATE TABLE trees (
 `;
 
 describe("db migration", () => {
-  it("upgrades a v1 store in place: archived column appears, rows survive", () => {
+  it("upgrades a v1 store in place: archived and folder columns appear, rows survive", () => {
     const path = tempDbPath();
     const v1 = new Database(path);
     v1.exec(V1_SCHEMA);
@@ -63,26 +64,32 @@ describe("db migration", () => {
     expect(rows).toHaveLength(1);
     expect(rows[0]!.name).toBe("old-tree");
     expect(rows[0]!.archived).toBe(0);
+    expect(rows[0]!.folder).toBeNull();
     const version = db.prepare("SELECT value FROM meta WHERE key = 'schema_version'").get() as {
       value: string;
     };
-    expect(version.value).toBe("3");
+    expect(version.value).toBe("4");
 
-    // The migrated store round-trips the new field.
-    upsertTree(db, { tree_id: "t_old", session_path: "/s/old.jsonl", archived: 1 });
+    // The migrated store round-trips the new fields.
+    upsertTree(db, { tree_id: "t_old", session_path: "/s/old.jsonl", archived: 1, folder: "work/auth" });
     expect(allTrees(db)[0]!.archived).toBe(1);
+    expect(allTrees(db)[0]!.folder).toBe("work/auth");
     db.close();
   });
 
-  it("creates fresh stores at the current version with archived persisting through upsert", () => {
+  it("creates fresh stores at the current version with archived and folder persisting through upsert", () => {
     const path = tempDbPath();
     const db = openDb(path);
-    upsertTree(db, { tree_id: "t_new", session_path: "/s/new.jsonl", archived: 1 });
+    upsertTree(db, { tree_id: "t_new", session_path: "/s/new.jsonl", archived: 1, folder: "side" });
     expect(allTrees(db)[0]!.archived).toBe(1);
+    expect(allTrees(db)[0]!.folder).toBe("side");
+    // Unfiling writes NULL back, not the string "null".
+    upsertTree(db, { tree_id: "t_new", session_path: "/s/new.jsonl", folder: null });
+    expect(allTrees(db)[0]!.folder).toBeNull();
     const version = db.prepare("SELECT value FROM meta WHERE key = 'schema_version'").get() as {
       value: string;
     };
-    expect(version.value).toBe("3");
+    expect(version.value).toBe("4");
     db.close();
   });
 });

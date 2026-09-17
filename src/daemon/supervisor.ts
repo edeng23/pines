@@ -28,6 +28,8 @@ export interface TreeRecord {
   seen: boolean;
   /** Archived: hidden from clients' default forest view; no live agent allowed. */
   archived: boolean;
+  /** Folder path ("work/auth") the tree is filed under; null = unfiled. */
+  folder: string | null;
   leafId: string | null;
   nodeCount: number;
   x: number;
@@ -217,6 +219,7 @@ export class Supervisor extends EventEmitter<SupervisorEvents> {
       // the tree as no longer live the moment eviction starts.
       live: (rec.agent?.isRunning ?? false) && !rec.evicting,
       archived: rec.archived,
+      folder: rec.folder,
       mtime: rec.mtime,
       lastExitCode: rec.lastExitCode,
       parentEntryId: rec.parentEntryId,
@@ -257,6 +260,7 @@ export class Supervisor extends EventEmitter<SupervisorEvents> {
       status: "dormant",
       seen: true,
       archived: false,
+      folder: null,
       leafId: null,
       nodeCount: 0,
       x: 0,

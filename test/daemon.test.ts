@@ -179,6 +179,70 @@ describe("daemon", () => {
     c.sock.destroy();
   });
 
+  it("files a tree under a folder: normalized, broadcast, and unfiled again", async () => {
+    const c = await connectClient();
+    const hello = await waitFor(
+      () => c.inbox.find((m) => (m as { t?: string }).t === "hello_ok") as
+        | { forest: Array<Record<string, unknown>> }
+        | undefined,
+      5000,
+      "hello_ok",
+    );
+    // Any tree will do — the earlier tests left some behind; else spawn one.
+    let treeId = hello.forest[0]?.treeId as string | undefined;
+    if (!treeId) {
+      c.wire.send({ t: "spawn_tree", id: "sf-spawn", cwd: home });
+      const spawned = await waitFor(() => findResult(c.inbox, "sf-spawn"), 8000, "spawn result");
+      treeId = spawned.newTreeId as string;
+    }
+    const upsertsFor = (id: string) =>
+      c.inbox
+        .filter((m) => (m as { t?: string }).t === "forest_update")
+        .flatMap((m) => ((m as { upsert?: Array<Record<string, unknown>> }).upsert ?? []))
+        .filter((t) => t.treeId === id);
+
+    // Sloppy input normalizes: segments trimmed, empties dropped.
+    c.wire.send({ t: "set_folder", id: "sf-1", treeId, folder: " work / auth / " });
+    const ok = await waitFor(() => findResult(c.inbox, "sf-1"), 8000, "set_folder result");
+    expect(ok.ok).toBe(true);
+    await waitFor(
+      () => (upsertsFor(treeId!).some((t) => t.folder === "work/auth") ? true : undefined),
+      8000,
+      "folder broadcast",
+    );
+    // A fresh client sees it in hello_ok too (it's daemon state, not client state).
+    const d = await connectClient();
+    const hello2 = await waitFor(
+      () => d.inbox.find((m) => (m as { t?: string }).t === "hello_ok") as
+        | { forest: Array<Record<string, unknown>> }
+        | undefined,
+      5000,
+      "hello_ok",
+    );
+    expect(hello2.forest.find((t) => t.treeId === treeId)?.folder).toBe("work/auth");
+    d.sock.destroy();
+
+    // A folder made only of separators is a refusal, not silent unfiling.
+    c.wire.send({ t: "set_folder", id: "sf-empty", treeId, folder: " / " });
+    const empty = await waitFor(() => findResult(c.inbox, "sf-empty"), 8000, "empty result");
+    expect(empty.ok).toBe(false);
+
+    // null unfiles.
+    c.wire.send({ t: "set_folder", id: "sf-2", treeId, folder: null });
+    const un = await waitFor(() => findResult(c.inbox, "sf-2"), 8000, "unfile result");
+    expect(un.ok).toBe(true);
+    await waitFor(
+      () => (upsertsFor(treeId!).some((t) => t.folder === null) ? true : undefined),
+      8000,
+      "unfile broadcast",
+    );
+
+    c.wire.send({ t: "set_folder", id: "sf-nope", treeId: "t_missing", folder: "x" });
+    const nope = await waitFor(() => findResult(c.inbox, "sf-nope"), 8000, "unknown tree");
+    expect(nope.ok).toBe(false);
+    c.sock.destroy();
+  });
+
   it("rejects spawning in a nonexistent cwd with a clear reason", async () => {
     const c = await connectClient();
     await waitFor(() => c.inbox.find((m) => (m as { t?: string }).t === "hello_ok"), 5000, "hello_ok");

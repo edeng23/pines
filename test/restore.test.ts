@@ -128,6 +128,7 @@ describe("restart restore", () => {
       });
       sock.once("connect", () => {
         wire.send({ t: "hello", role: "client", protocolVersion: PROTOCOL_VERSION, cols: 80, rows: 24 });
+        wire.send({ t: "set_folder", id: "fold1", treeId: before!.treeId, folder: "work/parsers" });
         wire.send({ t: "set_archived", id: "arch1", treeId: before!.treeId, archived: true });
       });
     });
@@ -156,5 +157,7 @@ describe("restart restore", () => {
     expect(restored!.x).toBe(savedX);
     expect(restored!.y).toBe(savedY);
     expect(restored!.archived).toBe(true);
+    // The folder came from the same kill -9'd daemon: filed state is durable state.
+    expect(restored!.folder).toBe("work/parsers");
   }, 40_000);
 });

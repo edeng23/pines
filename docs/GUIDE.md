@@ -75,6 +75,9 @@ share one selection: moving in the list pans the camera only when the tree is
 off-screen. `S` toggles the sidebar, `[`/`]` resize it, or drag the divider;
 width and visibility persist in `~/.pines/ui.json`.
 
+Trees can be filed into **folders** (`m`): collapsible sections of the
+sidebar. See [Folders](#folders) below.
+
 The canvas draws the **canopy** — a forester's plat: sunlit pines on graph
 paper, lineage surveyed in right angles. A tree grows with the conversation
 behind it on a log curve that never tops out: one new crown row per rough
@@ -96,7 +99,8 @@ run tree to tree and disappear behind the wood.
 pnpm build && pnpm demo      # a throwaway forest under ~/.pines-demo
 ```
 
-`pnpm demo` generates ~18 sessions across three projects — including one
+`pnpm demo` generates ~18 sessions across three projects, pre-filed into
+`projects/<topic>` folders (the live agents are left unfiled) — including one
 branched conversation (“plan the v1 release”: sibling branches, a branch of
 a branch, and a parked fork — open it with `→` to see the one-tree merge,
 agent tips, and the metro map) — and starts three
@@ -122,7 +126,7 @@ and a first run — all placed by the same layout the daemon uses.
 
 | view | keys / mouse |
 |---|---|
-| forest | `↑`/`↓` move through the sidebar list · `Enter` attach · `→` open tree view · wheel = zoom at cursor · drag = pan · click = select · double-click = open (canvas) / attach (sidebar) · `hjkl` pan · `+`/`-` zoom · `0` fit · `Tab` cycle by attention · `o` jump to most urgent · `a` attach · `n` new tree and attach · `r`/`L` rename tree · `A`/`Ctrl+X` archive/unarchive · `.` show/hide archived · `S` sidebar · `[`/`]` sidebar width · `x` kill agent · `R` relayout · `g` layout picker (experimental) · `s` similar conversations · `/` search · `?` help |
+| forest | `↑`/`↓` move through the sidebar list · `Enter` attach · `→` open tree view · wheel = zoom at cursor · drag = pan · click = select · double-click = open (canvas) / attach (sidebar) · `hjkl` pan · `+`/`-` zoom · `0` fit · `Tab` cycle by attention · `o` jump to most urgent · `a` attach · `n` new tree and attach · `r`/`L` rename tree (or the folder under the cursor) · `m` file in a folder · `f`/`←` fold the folder at the cursor · `→`/`Enter` on a folder row unfold · `A`/`Ctrl+X` archive/unarchive · `.` show/hide archived · `S` sidebar · `[`/`]` sidebar width · `x` kill agent · `R` relayout · `g` layout picker (experimental) · `s` similar conversations · `/` search · `?` help |
 | tree | `↑`/`↓` or `j`/`k` move · `→`/`Enter` — on a tip (a node showing an agent's status): attach to that branch's agent (resume if dormant); on a `⋯` row: expand; on a `[+]` row: unfold; on any other message: grow a new branch there with its own agent and attach (from a question: *beside* it — the question stays out) · `f` flow (one branch's conversation) ⇄ full tree · `Tab`/`Shift+Tab` next/prev branch · `1`-`9` jump to a branch tip · `←`/`Esc` back to the forest · `b` branch menu (with/without agent) · `L` label · `r` rename tree · `/` search |
 | attached pi | everything goes to pi, except the prefix `Ctrl+t`: `←`/`d` = back to tree · `f` = forest · `n` = next attention target · `Ctrl+t Ctrl+t` = send a literal Ctrl+t |
 
@@ -188,6 +192,49 @@ anything — the session file, search index, and lineage all stay. `.` reveals
 the archived group at the bottom of the sidebar; `A` again (or resuming the
 tree, from anywhere) un-archives it. Trees with a live agent refuse to archive:
 kill the agent first (`x`).
+
+## Folders
+
+`m` files the selected conversation in a folder: pick an existing one from
+the menu, `+ new folder…` to type a path (`work/auth` nests; under an open
+folder a bare name nests inside it, a leading `/` makes it top-level), or
+`− unfile`. Filing a conversation files all of its branches. Folders are
+daemon state (they survive restarts and show in every client) and a folder
+lives as long as any tree names it.
+
+In the sidebar, folders are **collapsible sections**, nested by path, each
+header carrying its subtree's badges (`●2 ◐1 7`: needs input, working,
+total); a folder's trees sit under it in triage order, one indent step in.
+Unfiled trees follow in the usual state groups, archived trees last. The
+canvas is untouched — folding is a list affair.
+
+```
+ ▾ side                      ●1 2
+  ● add usage examples        45m
+  · write docs for the wire … 25h
+ ▾ work                   ●1 ◐1 5
+  ○ migrate the sqlite schema 30m
+  ▾ auth                     ●1 2
+   ● add oauth token refresh   3m
+  ▸ perf                     ◐1 2
+ unfiled
+ ◐ review this diff      pines 8m
+```
+
+- `↑`/`↓` walk folder rows as well as trees. On a folder row: `⏎`/`→`
+  unfold (or fold), `←`/`f` fold — and `←` on an already-folded folder
+  climbs to its parent; `r` renames the folder (everything beneath moves
+  along); `n` starts a new tree filed in it. On a tree: `f` or `←` folds
+  the folder it sits in.
+- Clicking a folder row selects it; a second click folds/unfolds.
+- Folds persist in `~/.pines/ui.json`. `Tab`/`o` attention cycling walks
+  trees only — folders are structure, never targets.
+
+`pnpm tsx scripts/folders-preview.ts` renders the sidebar with folders from
+a fixed forest, and `pnpm demo` opens a sandbox that is already filed.
+This layout was picked over a drill-down, a tab strip and a flat
+chips-plus-filter list after trying all four; [docs/FOLDERS-UX.md](FOLDERS-UX.md)
+records the alternatives and the survey of other TUIs behind them.
 
 ## Semantic layout
 

@@ -16,7 +16,7 @@
 import * as net from "node:net";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 
-const PROTOCOL_VERSION = 2;
+const PROTOCOL_VERSION = 3;
 const NAV_COMMAND = "pines-nav";
 
 export default function pinesExtension(pi: ExtensionAPI): void {

@@ -10,7 +10,7 @@
 import type { LayoutStrategy } from "../layout/strategies.js";
 import type { SearchHit, SimilarHit, TreeDetail, TreeStatus, TreeSummary } from "./types.js";
 
-export const PROTOCOL_VERSION = 2;
+export const PROTOCOL_VERSION = 3;
 
 /* ---------------------------------- client → daemon ---------------------------------- */
 
@@ -119,6 +119,14 @@ export interface SetArchivedMsg {
   archived: boolean;
 }
 
+/** File a tree under a folder path ("work/auth"); null unfiles it. */
+export interface SetFolderMsg {
+  t: "set_folder";
+  id: string;
+  treeId: string;
+  folder: string | null;
+}
+
 export interface RelayoutMsg {
   t: "relayout";
   id: string;
@@ -157,6 +165,7 @@ export type ClientToDaemon =
   | RenameTreeMsg
   | SetLabelMsg
   | SetArchivedMsg
+  | SetFolderMsg
   | RelayoutMsg
   | SimilarMsg
   | ShutdownMsg;

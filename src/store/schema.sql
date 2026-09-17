@@ -24,6 +24,8 @@ CREATE TABLE IF NOT EXISTS trees (
   y                   REAL NOT NULL DEFAULT 0,
   pinned              INTEGER NOT NULL DEFAULT 0,
   archived            INTEGER NOT NULL DEFAULT 0,
+  -- Folder path ('/'-separated, e.g. 'work/auth'); NULL = unfiled.
+  folder              TEXT,
   last_screen         BLOB,
   created_at          INTEGER NOT NULL,
   updated_at          INTEGER NOT NULL
