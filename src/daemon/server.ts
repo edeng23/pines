@@ -77,6 +77,7 @@ function deriveTreeName(parsed: ParsedSession): string | null {
 import { relax } from "../layout/relax.js";
 import { branchInPlace, branchToNewTree, setNodeLabel, type BranchDeps } from "./branch.js";
 import { SemanticLayout } from "./semantic.js";
+import { parseLayoutStrategy } from "../layout/strategies.js";
 import { searchFts } from "../store/db.js";
 import { rankSimilar } from "./chunksim.js";
 import { essenceChunks } from "./essence.js";
@@ -484,6 +485,7 @@ export class Daemon {
             protocolVersion: PROTOCOL_VERSION,
             daemonPid: process.pid,
             piVersion: this.piVersion,
+            layout: this.semantic.strategy(),
             forest: this.supervisor.forest(),
           });
           log(`client connected (${this.clients.size} total)`);
@@ -548,10 +550,17 @@ export class Daemon {
         return this.handleSetArchived(client, msg);
       case "set_folder":
         return this.handleSetFolder(client, msg);
-      case "relayout":
-        this.semantic.refit();
-        client.wire.send({ t: "result", re: msg.id, ok: true });
+      case "relayout": {
+        const wanted = parseLayoutStrategy(msg.layout);
+        if (msg.layout !== undefined && !wanted) {
+          client.wire.send({ t: "result", re: msg.id, ok: false, err: `unknown layout: ${String(msg.layout)}` });
+          return;
+        }
+        if (wanted) this.semantic.setStrategy(wanted);
+        else this.semantic.refit();
+        client.wire.send({ t: "result", re: msg.id, ok: true, layout: this.semantic.strategy() });
         return;
+      }
       case "shutdown":
         log("shutdown requested by client");
         await this.shutdown();

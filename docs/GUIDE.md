@@ -126,7 +126,7 @@ and a first run — all placed by the same layout the daemon uses.
 
 | view | keys / mouse |
 |---|---|
-| forest | `↑`/`↓` move through the sidebar list · `Enter` attach · `→` open tree view · wheel = zoom at cursor · drag = pan · click = select · double-click = open (canvas) / attach (sidebar) · `hjkl` pan · `+`/`-` zoom · `0` fit · `Tab` cycle by attention · `o` jump to most urgent · `a` attach · `n` new tree and attach · `r`/`L` rename tree (or the folder under the cursor) · `m` file in a folder · `f`/`←` fold the folder at the cursor · `→`/`Enter` on a folder row unfold · `A`/`Ctrl+X` archive/unarchive · `.` show/hide archived · `S` sidebar · `[`/`]` sidebar width · `x` kill agent · `R` relayout · `s` similar conversations · `/` search · `?` help |
+| forest | `↑`/`↓` move through the sidebar list · `Enter` attach · `→` open tree view · wheel = zoom at cursor · drag = pan · click = select · double-click = open (canvas) / attach (sidebar) · `hjkl` pan · `+`/`-` zoom · `0` fit · `Tab` cycle by attention · `o` jump to most urgent · `a` attach · `n` new tree and attach · `r`/`L` rename tree (or the folder under the cursor) · `m` file in a folder · `f`/`←` fold the folder at the cursor · `→`/`Enter` on a folder row unfold · `A`/`Ctrl+X` archive/unarchive · `.` show/hide archived · `S` sidebar · `[`/`]` sidebar width · `x` kill agent · `R` relayout · `g` layout picker (experimental) · `s` similar conversations · `/` search · `?` help |
 | tree | `↑`/`↓` or `j`/`k` move · `→`/`Enter` — on a tip (a node showing an agent's status): attach to that branch's agent (resume if dormant); on a `⋯` row: expand; on a `[+]` row: unfold; on any other message: grow a new branch there with its own agent and attach (from a question: *beside* it — the question stays out) · `f` flow (one branch's conversation) ⇄ full tree · `Tab`/`Shift+Tab` next/prev branch · `1`-`9` jump to a branch tip · `←`/`Esc` back to the forest · `b` branch menu (with/without agent) · `L` label · `r` rename tree · `/` search |
 | attached pi | everything goes to pi, except the prefix `Ctrl+t`: `←`/`d` = back to tree · `f` = forest · `n` = next attention target · `Ctrl+t Ctrl+t` = send a literal Ctrl+t |
 
@@ -254,6 +254,26 @@ trees never jump**; `R` refits. Offline or before the model warms, a
 deterministic lexical layout (cwd clusters on a spiral, recency rings) applies
 — the forest always loads instantly.
 
+**Layout strategies (experimental).** The forest can feel packed: a PCA of
+sentence embeddings is a blob, and the overlap pass then spreads that blob
+into an even lattice, so groups of related conversations stop reading as
+groups. Several candidate layouts live side by side for now, so they can be
+judged on a real forest before one becomes *the* layout. `g` in the forest
+view opens the picker (the daemon remembers the pick; `R` lays out again with
+it), `"layout"` in `~/.pines/config.json` or `PINES_LAYOUT=…` sets the
+default:
+
+| id | what it does |
+|---|---|
+| `pca` | today's layout, the baseline |
+| `wide` | the same, stretched sideways to fill a wide terminal at fit zoom |
+| `groves` | clusters the embeddings first; groves stand apart, members pack inside |
+| `projects` | one grove per working directory, laid out by topic inside |
+| `springs` | force-directed from the PCA start: similar trees pull together, the rest push away |
+
+Compare them without a daemon: `pnpm tsx scripts/forest-preview.ts --scenario
+layout-groves` (one pane per strategy, `layout-<id>`, on identical input).
+
 **Similar trees** (`s`): ranks the forest against the selected tree in two
 stages — a cheap pooled-cosine shortlist over everything, then an exact
 re-rank that *matches the two trees' chunks* (each message finds its best
@@ -277,7 +297,8 @@ projected to 2-D for stability); the `s` list is the honest one.
   "notifySound": "Submarine",
   "maxLiveAgents": 12,
   "piBin": "/path/to/custom/pi",
-  "embedModel": "Xenova/bge-small-en-v1.5"
+  "embedModel": "Xenova/bge-small-en-v1.5",
+  "layout": "groves"
 }
 ```
 
@@ -316,6 +337,9 @@ fails with a message naming who is busy.
 `embedModel` swaps the local embedding model (default MiniLM;
 `Xenova/bge-small-en-v1.5` is a known-good 384-d quality upgrade). Changing it
 re-embeds everything on the next daemon start.
+
+`layout` (experimental) picks the forest layout strategy — see *Layout
+strategies* above; a pick made with `g` in the forest view takes precedence.
 
 `piBin` is an optional development/custom-runtime override; by default pines
 uses its bundled, version-matched pi. Env overrides: `PINES_HOME`, `PINES_SOCK`,

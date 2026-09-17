@@ -38,6 +38,12 @@ export interface PinesConfig {
    * quality upgrade. Changing this triggers a full re-embed on next start.
    */
   embedModel?: string;
+  /**
+   * EXPERIMENTAL: which forest layout to use — "pca" (current), "wide",
+   * "groves", "projects", or "springs". A pick made in the forest view (`g`)
+   * overrides this; env PINES_LAYOUT overrides that. See layout/strategies.ts.
+   */
+  layout?: string;
 }
 
 let cached: PinesConfig | undefined;
