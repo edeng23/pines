@@ -74,6 +74,36 @@ describe("session parser", () => {
     expect(byId.get("dddd0004")).toBe("All green."); // text always wins
   });
 
+  it("treats pi 0.86+ system prompts, usage and context edits as plumbing", async () => {
+    // Newer pi opens every session with a system-role message (prompt in
+    // `sections`, empty content) and records cache-warming usage and
+    // model-context edits as tree entries. None of them are conversation.
+    const raw = (obj: Record<string, unknown>) =>
+      JSON.stringify({ timestamp: "2026-09-25T10:00:00Z", ...obj });
+    const lines = [
+      header("/tmp/x"),
+      raw({
+        type: "message",
+        id: "eeee0001",
+        parentId: null,
+        message: { role: "system", content: "", sections: { preamble: "You are…" }, timestamp: 0 },
+      }),
+      msg("eeee0002", "eeee0001", "user", "hello"),
+      raw({ type: "usage", id: "eeee0003", parentId: "eeee0002", kind: "cache_warm", usage: {} }),
+      raw({ type: "context_edit", id: "eeee0004", parentId: "eeee0003", targetId: "eeee0002", replacement: null }),
+      msg("eeee0005", "eeee0004", "assistant", "hi"),
+    ];
+    const parsed = await parseSessionContent(lines.join("\n") + "\n");
+    expect(parsed.firstUserText).toBe("hello");
+    const detail = toTreeDetail("t_test", parsed);
+    expect(detail.nodes.eeee0001?.kind).toBe("custom");
+    expect(detail.nodes.eeee0001?.excerpt).toBe("system prompt / tools updated");
+    expect(detail.nodes.eeee0003?.kind).toBe("custom");
+    expect(detail.nodes.eeee0004?.kind).toBe("custom");
+    expect(detail.nodes.eeee0004?.excerpt).toBe("context: entry omitted");
+    expect(detail.nodes.eeee0005?.kind).toBe("assistant");
+  });
+
   it("captures parentSession lineage from the header", async () => {
     const lines = [
       header("/tmp/x", { parentSession: "/tmp/other/session.jsonl" }),
