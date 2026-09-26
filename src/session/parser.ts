@@ -77,7 +77,11 @@ function entryText(raw: Record<string, unknown>): { role: string | null; text: s
   if (type === "message") {
     const msg = raw.message as Record<string, unknown> | undefined;
     const role = (msg?.role as string) ?? null;
-    return { role, text: textOf(msg?.content).trim() };
+    const text = textOf(msg?.content).trim();
+    // pi ≥0.86 records the system prompt and tool set as transcript messages
+    // (one opens every session); the prompt lives in `sections`, not content.
+    if (role === "system") return { role, text: text || "system prompt / tools updated" };
+    return { role, text };
   }
   if (type === "compaction" || type === "branch_summary") {
     return { role: null, text: String(raw.summary ?? "").trim() };
@@ -98,6 +102,15 @@ function entryText(raw: Record<string, unknown>): { role: string | null; text: s
   }
   if (type === "active_tools_change") {
     return { role: null, text: "active tools changed" };
+  }
+  if (type === "usage") {
+    return { role: null, text: `usage (${String(raw.kind ?? "?")})` };
+  }
+  if (type === "context_edit") {
+    return {
+      role: null,
+      text: raw.replacement === null ? "context: entry omitted" : "context: entry replaced",
+    };
   }
   return { role: null, text: "" };
 }
@@ -237,18 +250,22 @@ function nodeKind(e: ParsedEntry): NodeSummary["kind"] {
     if (e.role === "user") return "user";
     if (e.role === "assistant") return "assistant";
     if (e.role === "toolResult") return "tool";
+    if (e.role === "system") return "custom";
     return "other";
   }
   if (e.type === "compaction") return "compaction";
   if (e.type === "branch_summary") return "branch_summary";
   if (e.type === "custom" || e.type === "custom_message") return "custom";
-  // Settings changes are plumbing, not conversation: give them the same
-  // spliceable kind as pines' own markers so trees don't open with a stack
-  // of unreadable bookkeeping rows.
+  // Settings changes, background usage (cache warming) and model-context
+  // edits are plumbing, not conversation: give them the same spliceable kind
+  // as pines' own markers so trees don't open with a stack of unreadable
+  // bookkeeping rows.
   if (
     e.type === "model_change" ||
     e.type === "thinking_level_change" ||
-    e.type === "active_tools_change"
+    e.type === "active_tools_change" ||
+    e.type === "usage" ||
+    e.type === "context_edit"
   ) {
     return "custom";
   }
