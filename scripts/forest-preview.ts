@@ -19,6 +19,8 @@ import { renderForest } from "../src/client/forest/view.js";
 import { fitCamera, worldToCell, type Viewport } from "../src/client/forest/camera.js";
 import { assignLexicalPositions } from "../src/layout/lexical.js";
 import { relax } from "../src/layout/relax.js";
+import { LAYOUT_STRATEGIES, layoutForest, type LayoutStrategy } from "../src/layout/strategies.js";
+import { syntheticForest } from "../test/fixtures/embeddings.js";
 import type { Camera, TreeSummary } from "../src/shared/types.js";
 
 const NOW = Date.UTC(2026, 0, 2, 12, 0, 0);
@@ -130,6 +132,43 @@ function grownForest(count: number, repos: number): TreeSummary[] {
   return trees;
 }
 
+/**
+ * A forest with embeddings, placed by one of the candidate layout strategies:
+ * the same forty conversations about eight topics in three repos, so the
+ * strategies can be compared on identical input.
+ */
+function semanticForest(strategy: LayoutStrategy, count = 40): TreeSummary[] {
+  const synth = syntheticForest({ count, topics: 8, repos: 3 });
+  const trees = synth.map((s, i) => {
+    const status: TreeSummary["status"] =
+      i === 0 || i === 11 ? "running"
+      : i === 3 || i === 17 ? "waiting"
+      : i === 8 ? "crashed"
+      : i % 5 === 2 ? "completed"
+      : "dormant";
+    return tree({
+      id: s.id,
+      name: PROMPTS[(i * 7) % PROMPTS.length]!,
+      cwd: s.cwd,
+      status,
+      seen: !(i === 3 || i === 8 || i === 22),
+      live: status === "running" || status === "waiting",
+      nodes: [4, 12, 28, 60, 140, 9, 33, 17][i % 8]!,
+      ageMin: (i + 1) * 13,
+    });
+  });
+  const { positions } = layoutForest(
+    strategy,
+    synth.map((s) => ({ id: s.id, vec: s.vec, cwd: s.cwd, x: 0, y: 0 })),
+  );
+  for (const t of trees) {
+    const p = positions.get(t.treeId)!;
+    t.x = p.x;
+    t.y = p.y;
+  }
+  return trees;
+}
+
 /** A single lineage: one session that got branched three ways. */
 function branchedForest(): TreeSummary[] {
   const seeds: Seed[] = [
@@ -220,6 +259,18 @@ export const SCENARIOS: Scenario[] = [
     selectedId: "login",
     zoom: 8,
   },
+  // One pane per candidate layout, on identical input — the density
+  // comparison. Pick one here, then the others go.
+  ...LAYOUT_STRATEGIES.map(
+    (s): Scenario => ({
+      id: `layout-${s.id}`,
+      label: `layout: ${s.name}`,
+      blurb: `forty sessions, eight topics, three repos — ${s.blurb}`,
+      trees: semanticForest(s.id),
+      vp: { width: 110, height: 30 },
+      selectedId: "s3",
+    }),
+  ),
 ];
 
 function cameraFor(sc: Scenario): Camera {

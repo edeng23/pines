@@ -7,6 +7,7 @@
  * NOTE: src/extension/pines-extension.ts duplicates the extension-facing subset
  * of these shapes inline (it must be dependency-free under jiti). Keep in sync.
  */
+import type { LayoutStrategy } from "../layout/strategies.js";
 import type { SearchHit, SimilarHit, TreeDetail, TreeStatus, TreeSummary } from "./types.js";
 
 export const PROTOCOL_VERSION = 3;
@@ -129,6 +130,11 @@ export interface SetFolderMsg {
 export interface RelayoutMsg {
   t: "relayout";
   id: string;
+  /**
+   * EXPERIMENTAL: switch the forest to this layout strategy before laying it
+   * out (persisted daemon-side). Omit to relayout with the current one.
+   */
+  layout?: LayoutStrategy;
 }
 
 /** Nearest trees to `treeId` by embedding cosine similarity. */
@@ -173,6 +179,8 @@ export interface HelloOk {
   forest: TreeSummary[];
   /** Version of the pi runtime this daemon launches (absent while probing). */
   piVersion?: string;
+  /** EXPERIMENTAL: the layout strategy the forest is currently laid out with. */
+  layout?: LayoutStrategy;
 }
 
 export interface HelloErr {
@@ -226,6 +234,8 @@ export interface ResultMsg {
   similar?: SimilarHit[];
   /** get_tree result */
   tree?: TreeDetail;
+  /** relayout result: the strategy the forest is now laid out with */
+  layout?: LayoutStrategy;
 }
 
 export interface ToastMsg {

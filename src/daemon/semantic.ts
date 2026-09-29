@@ -12,8 +12,16 @@
  * tracks where the conversation *went*, not just how it started.
  */
 import { Worker } from "node:worker_threads";
-import { fitPca, projectPca, type PcaBasis } from "../layout/pca.js";
-import { relax } from "../layout/relax.js";
+import type { PcaBasis } from "../layout/pca.js";
+import {
+  DEFAULT_LAYOUT,
+  layoutForest,
+  MIN_TREES_FOR_LAYOUT,
+  parseLayoutStrategy,
+  placeNewTree,
+  type LayoutItem,
+  type LayoutStrategy,
+} from "../layout/strategies.js";
 import { parseSessionFile } from "../session/parser.js";
 import {
   chunksForTree,
@@ -35,7 +43,7 @@ import {
 import type { Supervisor, TreeRecord } from "./supervisor.js";
 
 const DEBOUNCE_MS = 5000;
-const MIN_TREES_FOR_PCA = 3;
+const MIN_TREES_FOR_PCA = MIN_TREES_FOR_LAYOUT;
 /** Bump when chunking/pooling changes meaningfully: stale trees re-embed at startup. */
 export const EMBED_VERSION = 2;
 /** Stagger between startup backfill enqueues, so a big forest warms up gently. */
@@ -296,6 +304,45 @@ export class SemanticLayout {
       .all() as Array<{ tree_id: string; embedding: Buffer }>;
   }
 
+  /**
+   * The layout strategy in force: the last one picked from a client (kept in
+   * the store), else `PINES_LAYOUT`, else config.json's `layout`, else the
+   * default. EXPERIMENTAL — a comparison switch, see layout/strategies.ts.
+   */
+  strategy(): LayoutStrategy {
+    const stored = this.deps.db
+      .prepare("SELECT value FROM meta WHERE key = 'layout_strategy'")
+      .get() as { value: string } | undefined;
+    return (
+      parseLayoutStrategy(stored?.value) ??
+      parseLayoutStrategy(process.env.PINES_LAYOUT) ??
+      parseLayoutStrategy(loadConfig().layout) ??
+      DEFAULT_LAYOUT
+    );
+  }
+
+  /** Switch strategy (persisted) and lay the forest out again with it. */
+  setStrategy(strategy: LayoutStrategy): void {
+    this.deps.db
+      .prepare(
+        "INSERT INTO meta (key, value) VALUES ('layout_strategy', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+      )
+      .run(strategy);
+    this.refit();
+  }
+
+  /** Every tree as the layout sees it: its vector when embedded, its spot always. */
+  private layoutItems(rows = this.embeddedRows()): LayoutItem[] {
+    const byId = new Map(rows.map((r) => [r.tree_id, vectorOf(r.embedding)]));
+    return [...this.deps.supervisor.trees.values()].map((t) => ({
+      id: t.treeId,
+      vec: byId.get(t.treeId) ?? null,
+      cwd: t.cwd,
+      x: t.x,
+      y: t.y,
+    }));
+  }
+
   /** Place one newly-embedded tree without disturbing the rest. */
   private placeTree(treeId: string): void {
     const rows = this.embeddedRows();
@@ -307,19 +354,10 @@ export class SemanticLayout {
       return;
     }
 
-    const row = rows.find((r) => r.tree_id === treeId);
     const rec = this.deps.supervisor.trees.get(treeId);
-    if (!row || !rec) return;
-    const pos = projectPca(stored.basis, vectorOf(row.embedding));
-
-    const points = [...this.deps.supervisor.trees.values()].map((t) => ({
-      x: t === rec ? pos.x : t.x,
-      y: t === rec ? pos.y : t.y,
-      pinned: t !== rec,
-      rec: t,
-    }));
-    relax(points);
-    const placed = points.find((p) => p.rec === rec)!;
+    if (!rec) return;
+    const placed = placeNewTree(this.strategy(), this.layoutItems(rows), treeId, stored.basis);
+    if (!placed) return;
     rec.x = placed.x;
     rec.y = placed.y;
     this.deps.supervisor.notify(rec);
@@ -328,31 +366,19 @@ export class SemanticLayout {
   /** Refit the basis and reproject every embedded tree (non-embedded pinned). */
   refit(rows = this.embeddedRows()): void {
     if (rows.length < MIN_TREES_FOR_PCA) return;
-    const vectors = rows.map((r) => vectorOf(r.embedding));
-    const basis = fitPca(vectors);
-    this.saveBasis(basis, rows.length);
-
-    const byId = new Map(rows.map((r, i) => [r.tree_id, vectors[i]!]));
-    const points: Array<{ x: number; y: number; pinned: boolean; rec: TreeRecord }> = [];
+    const strategy = this.strategy();
+    const { positions, basis } = layoutForest(strategy, this.layoutItems(rows));
+    if (basis) this.saveBasis(basis, rows.length);
     for (const rec of this.deps.supervisor.trees.values()) {
-      const vec = byId.get(rec.treeId);
-      if (vec) {
-        const pos = projectPca(basis, vec);
-        points.push({ x: pos.x, y: pos.y, pinned: false, rec });
-      } else {
-        points.push({ x: rec.x, y: rec.y, pinned: true, rec });
+      const p = positions.get(rec.treeId);
+      if (!p) continue;
+      if (rec.x !== p.x || rec.y !== p.y) {
+        rec.x = p.x;
+        rec.y = p.y;
+        this.deps.supervisor.notify(rec);
       }
     }
-    relax(points);
-    for (const p of points) {
-      if (p.pinned) continue;
-      if (p.rec.x !== p.x || p.rec.y !== p.y) {
-        p.rec.x = p.x;
-        p.rec.y = p.y;
-        this.deps.supervisor.notify(p.rec);
-      }
-    }
-    this.deps.log(`semantic refit over ${rows.length} embedded tree(s)`);
+    this.deps.log(`semantic refit (${strategy}) over ${rows.length} embedded tree(s)`);
   }
 
   async dispose(): Promise<void> {

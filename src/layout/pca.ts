@@ -71,12 +71,12 @@ function topComponent(
   return v;
 }
 
-export function fitPca(vectors: Float32Array[] | number[][], targetSpan = 30): PcaBasis {
+export function fitPca(vectors: ArrayLike<number>[], targetSpan = 30): PcaBasis {
   const n = vectors.length;
   const d = vectors[0]?.length ?? 0;
   const mean = new Array<number>(d).fill(0);
   for (const v of vectors) for (let i = 0; i < d; i++) mean[i]! += (v[i] as number) / n;
-  const centered = (vectors as ArrayLike<number>[]).map((v) => {
+  const centered = vectors.map((v) => {
     const c = new Array<number>(d);
     for (let i = 0; i < d; i++) c[i] = (v[i] as number) - mean[i]!;
     return c;
