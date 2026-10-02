@@ -22,6 +22,7 @@ import {
   type GetTreeMsg,
   type RenameTreeMsg,
   type ResumeTreeMsg,
+  type ScreenMsg,
   type SearchMsg,
   type SetArchivedMsg,
   type SetFolderMsg,
@@ -128,6 +129,11 @@ export class Daemon {
       onSessionActivity: (sessionPath) => void this.ingest(sessionPath),
       isAttached: (treeId) => this.isAttached(treeId),
       onSettled: (treeId) => void this.runPendingNav(treeId),
+      onLeave: (treeId) => {
+        for (const c of this.clients) {
+          if (c.attached.has(treeId)) c.wire.send({ t: "leave", treeId });
+        }
+      },
       log,
     });
     void piVersion().then((v) => {
@@ -373,8 +379,15 @@ export class Daemon {
       // processes claiming one session path must stay separate records.
       const owner = canonical !== spawned.treeId ? this.supervisor.trees.get(canonical) : undefined;
       if (canonical !== spawned.treeId && !owner?.agent?.isRunning) {
-        this.supervisor.trees.delete(spawned.treeId);
-        this.broadcast({ t: "forest_update", remove: [spawned.treeId] });
+        const from = spawned.treeId;
+        this.supervisor.trees.delete(from);
+        // Whoever is attached to the provisional id is attached to the SAME
+        // pty: carry the attachment over, or its output (and any leave) would
+        // be addressed to an id nobody holds.
+        for (const c of this.clients) {
+          if (c.attached.delete(from)) c.attached.add(canonical);
+        }
+        this.broadcast({ t: "forest_update", remove: [from], renamed: [{ from, to: canonical }] });
         spawned.treeId = canonical;
         this.supervisor.trees.set(canonical, spawned);
         this.supervisor.setStatus(spawned, spawned.status);
@@ -540,6 +553,8 @@ export class Daemon {
         return this.handleSimilar(client, msg);
       case "get_tree":
         return this.handleGetTree(client, msg);
+      case "screen":
+        return this.handleScreen(client, msg);
       case "rename_tree":
         return this.handleRename(client, msg);
       case "set_label":
@@ -654,6 +669,19 @@ export class Daemon {
       rows: rec.agent.rows,
     });
     this.supervisor.ackSeen(msg.treeId);
+  }
+
+  private async handleScreen(client: ClientConn, msg: ScreenMsg): Promise<void> {
+    const rec = this.supervisor.trees.get(msg.treeId);
+    if (!rec?.agent?.isRunning || rec.evicting) {
+      return this.fail(client, msg.id, "no live agent for tree");
+    }
+    client.wire.send({
+      t: "result",
+      re: msg.id,
+      ok: true,
+      screen: rec.agent.screenLines(Math.max(1, Math.floor(msg.cols))),
+    });
   }
 
   private async handleGetTree(client: ClientConn, msg: GetTreeMsg): Promise<void> {

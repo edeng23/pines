@@ -8,6 +8,9 @@
  * - echoes stdin lines as "echo:<line>"
  * - if PINES_SOCK is set and --ext-report is passed, connects to the daemon
  *   socket as an extension and reports scripted status events (M2 tests)
+ * - as that extension, mirrors the real one's ← rule: a plain ← arriving on
+ *   an empty line is swallowed and reported as a "leave" event; with text
+ *   pending it stays ordinary input
  */
 import net from "node:net";
 
@@ -21,8 +24,18 @@ const ticker = setInterval(() => {
 }, 300);
 
 let lineBuf = "";
+/** Set once the extension socket is up; the ← rule needs somewhere to report. */
+let extSend = null;
+// Raw mode, like a real TUI: keys arrive as they are typed instead of being
+// held by the line discipline until a newline (an arrow would never be seen).
+if (process.stdin.isTTY) process.stdin.setRawMode(true);
 process.stdin.on("data", (b) => {
-  lineBuf += b.toString("utf8");
+  let chunk = b.toString("utf8");
+  if (extSend && lineBuf === "" && chunk === "\x1b[D") {
+    extSend({ t: "ev", type: "leave" });
+    return;
+  }
+  lineBuf += chunk;
   let idx;
   while ((idx = lineBuf.indexOf("\r")) >= 0 || (idx = lineBuf.indexOf("\n")) >= 0) {
     const line = lineBuf.slice(0, idx);
@@ -39,10 +52,11 @@ if (process.env.PINES_SOCK && (args.includes("--ext-report") || process.env.FAKE
   const sock = net.connect(process.env.PINES_SOCK);
   const send = (obj) => sock.write(JSON.stringify(obj) + "\n");
   sock.on("connect", () => {
+    extSend = send;
     send({
       t: "hello",
       role: "extension",
-      protocolVersion: 3, // keep in sync with PROTOCOL_VERSION (dependency-free fixture)
+      protocolVersion: 4, // keep in sync with PROTOCOL_VERSION (dependency-free fixture)
       pid: process.pid,
       treeId: process.env.PINES_TREE_ID ?? "",
       // Real pi reports the session it was resumed on; mirror that when the

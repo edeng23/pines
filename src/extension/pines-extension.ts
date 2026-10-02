@@ -16,8 +16,24 @@
 import * as net from "node:net";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 
-const PROTOCOL_VERSION = 3;
+const PROTOCOL_VERSION = 4;
 const NAV_COMMAND = "pines-nav";
+
+/**
+ * Classify a raw input chunk as an unmodified ← arrow: legacy CSI/SS3, the
+ * kitty forms (`CSI 1;mods[:event] D`, keypad `CSI 57417[;mods[:event]] u`),
+ * tolerating the lock-key bits kitty may fold into `mods`. Returns which
+ * event it is, or null for anything else (modified arrows stay pi's).
+ */
+export function classifyLeft(data: string): "press" | "release" | null {
+  if (data === "\x1b[D" || data === "\x1bOD") return "press";
+  const m = /^\x1b\[(?:1;(\d+)(?::([123]))?D|57417(?:;(\d+)(?::([123]))?)?u)$/.exec(data);
+  if (!m) return null;
+  const mods = Number(m[1] ?? m[3] ?? "1");
+  // Modifier param = 1 + bits; caps/num lock (64/128) are not modifiers.
+  if (((mods - 1) & ~(64 | 128)) !== 0) return null;
+  return (m[2] ?? m[4]) === "3" ? "release" : "press";
+}
 
 export default function pinesExtension(pi: ExtensionAPI): void {
   const sockPath = process.env.PINES_SOCK;
@@ -31,6 +47,8 @@ export default function pinesExtension(pi: ExtensionAPI): void {
   let stamped = false;
   /** Editor draft saved around an injected /pines-nav submission. */
   let savedDraft: string | null = null;
+  /** Unsubscribes the ← listener; pi clears listeners across session changes. */
+  let unlistenInput: (() => void) | null = null;
 
   function send(obj: Record<string, unknown>): void {
     if (connected && socket) socket.write(JSON.stringify(obj) + "\n");
@@ -137,12 +155,34 @@ export default function pinesExtension(pi: ExtensionAPI): void {
     },
   });
 
+  /**
+   * A plain ← on an EMPTY editor has nothing to do inside pi, so it leaves:
+   * the key is consumed here and the daemon tells the attached pines client to
+   * step back out to the tree. Exact, not screen-scraped — the editor text is
+   * read straight from pi. Text in the editor keeps ← as cursor movement, and
+   * a modified arrow is never ours. Input only reaches this PTY through an
+   * attached pines client, so there is no one else to surprise.
+   */
+  function listenForLeave(ctx: ExtensionContext): void {
+    unlistenInput?.();
+    unlistenInput = null;
+    if (ctx.mode !== "tui") return;
+    unlistenInput = ctx.ui.onTerminalInput((data) => {
+      const kind = classifyLeft(data);
+      if (!kind || ctx.ui.getEditorText() !== "") return undefined;
+      // The release of a ← we swallowed must not land on the editor either.
+      if (kind === "press") send({ t: "ev", type: "leave" });
+      return { consume: true };
+    });
+  }
+
   pi.on("session_start", (_event, ctx) => {
     // Fires on startup AND after new/resume/fork (fresh runtime → re-hello).
     lastCtx = ctx;
     stamped = false;
     connect();
     if (connected) hello(ctx);
+    listenForLeave(ctx);
   });
 
   pi.on("agent_start", (_event, ctx) => {

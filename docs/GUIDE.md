@@ -65,8 +65,12 @@ automatically as dormant trees, via a watcher on `~/.pi/agent/sessions`.
 Three levels: **Forest ⇄ Tree ⇄ Node (attached pi)**. Arrow keys navigate the
 hierarchy like columns in a file browser: `→` descends (forest → tree → pi),
 `←` ascends, `↑`/`↓` move the selection. `Enter`/`Esc` still work everywhere.
-Inside pi the arrows belong to pi itself, so ascending from there is
-`Ctrl+t ←` (or `Ctrl+t d`).
+Inside pi the arrows belong to pi itself — with one exception that keeps
+the column metaphor whole: a plain `←` on an **empty** editor has nothing
+to do in pi, so it ascends to the tree. The pines extension inside pi reads
+the editor directly (no screen-scraping), consumes that one key, and the
+daemon tells the client to step out. Any text in the editor, or a modified
+arrow, leaves `←` to pi. `Ctrl+t ←` (or `Ctrl+t d`) always works too.
 
 The forest screen is split: an **agents sidebar** on the left (a state-grouped
 list of every tree — needs input first, then working, then recent — each row
@@ -77,6 +81,11 @@ width and visibility persist in `~/.pines/ui.json`.
 
 Trees can be filed into **folders** (`m`): collapsible sections of the
 sidebar. See [Folders](#folders) below.
+
+The right pane need not be the map: `v` swaps it for a **preview** of the
+selected conversation, so the sidebar becomes a browser — move the cursor,
+read what each tree is about, attach only when you mean to. See
+[Preview](#preview) below.
 
 The canvas draws the **canopy** — a forester's plat: sunlit pines on graph
 paper, lineage surveyed in right angles. A tree grows with the conversation
@@ -126,9 +135,9 @@ and a first run — all placed by the same layout the daemon uses.
 
 | view | keys / mouse |
 |---|---|
-| forest | `↑`/`↓` move through the sidebar list · `Enter` attach · `→` open tree view · wheel = zoom at cursor · drag = pan · click = select · double-click = open (canvas) / attach (sidebar) · `hjkl` pan · `+`/`-` zoom · `0` fit · `Tab` cycle by attention · `o` jump to most urgent · `a` attach · `n` new tree and attach · `r`/`L` rename tree (or the folder under the cursor) · `m` file in a folder · `f`/`←` fold the folder at the cursor · `→`/`Enter` on a folder row unfold · `A`/`Ctrl+X` archive/unarchive · `.` show/hide archived · `S` sidebar · `[`/`]` sidebar width · `x` kill agent · `R` relayout · `s` similar conversations · `/` search · `?` help |
+| forest | `↑`/`↓` move through the sidebar list · `Enter` attach · `→` open tree view · wheel = zoom at cursor · drag = pan · click = select · double-click = open (canvas) / attach (sidebar) · `hjkl` pan · `+`/`-` zoom · `0` fit · `Tab` cycle by attention · `o` jump to most urgent · `a` attach · `n` new tree and attach · `r`/`L` rename tree (or the folder under the cursor) · `m` file in a folder · `f`/`←` fold the folder at the cursor · `→`/`Enter` on a folder row unfold · `A`/`Ctrl+X` archive/unarchive · `.` show/hide archived · `v` preview pane (forest → conversation → live screen → forest) · `j`/`k` or wheel scroll a preview · `S` sidebar · `[`/`]` sidebar width · `x` kill agent · `R` relayout · `s` similar conversations · `/` search · `?` help |
 | tree | `↑`/`↓` or `j`/`k` move · `→`/`Enter` — on a tip (a node showing an agent's status): attach to that branch's agent (resume if dormant); on a `⋯` row: expand; on a `[+]` row: unfold; on any other message: grow a new branch there with its own agent and attach (from a question: *beside* it — the question stays out) · `f` flow (one branch's conversation) ⇄ full tree · `Tab`/`Shift+Tab` next/prev branch · `1`-`9` jump to a branch tip · `←`/`Esc` back to the forest · `b` branch menu (with/without agent) · `L` label · `r` rename tree · `/` search |
-| attached pi | everything goes to pi, except the prefix `Ctrl+t`: `←`/`d` = back to tree · `f` = forest · `n` = next attention target · `Ctrl+t Ctrl+t` = send a literal Ctrl+t |
+| attached pi | everything goes to pi, except: a plain `←` on an **empty** editor = back to tree (with text in the editor `←` is pi's cursor key, as always) · the prefix `Ctrl+t`: `←`/`d` = back to tree · `f` = forest · `n` = next attention target · `Ctrl+t Ctrl+t` = send a literal Ctrl+t |
 
 Zooming is semantic: the sprite is the tree at every distance — maturity by
 conversation size, life by color — and it fills out from a glyph to old
@@ -192,6 +201,30 @@ anything — the session file, search index, and lineage all stay. `.` reveals
 the archived group at the bottom of the sidebar; `A` again (or resuming the
 tree, from anywhere) un-archives it. Trees with a live agent refuse to archive:
 kill the agent first (`x`).
+
+## Preview
+
+`v` cycles what the right pane shows:
+
+1. **forest** — the canopy map (the default).
+2. **conversation** — the selected tree's message tree, exactly as the tree
+   view draws it: every branch, the agents panel and metro map when the
+   conversation has more than one tip, live status on each tip. No cursor;
+   the view is anchored at the tail with the leaf on screen, and `j`/`k` or
+   the wheel scroll it. Works for every tree, dormant ones included — this
+   is the one that answers "what was this about?" before you attach.
+3. **live screen** — the agent's own pi screen as it stands, refreshed a few
+   times a second: streaming text, a pending prompt, a permission question.
+   Only offered when the selected conversation has a live agent (several:
+   the one that needs you most, attach's own pick); otherwise `v` skips
+   straight back to the forest, and a saved screen preference falls back to
+   the conversation with a note in the header. Peeking is not attaching:
+   nothing is resized, the tree is not marked seen, and the pane crops the
+   agent's wider screen at the right edge rather than reflowing pi.
+
+The header row names the conversation, its state and age, and which body is
+showing. `↑`/`↓`, `Tab`, `o` and the search keep selecting as usual; `→`
+opens the tree, `↵` attaches. The choice persists in `~/.pines/ui.json`.
 
 ## Folders
 
@@ -341,6 +374,11 @@ Using tmux? Enable its mouse mode (`set -g mouse on`) to pass wheel events throu
   back dormant from SQLite on restart.
 - Ownership rule: a live tree's JSONL is written only by its pi process (via the
   extension); dormant trees only via pi's SDK. pines never hand-writes session files.
+- The extension also owns the one key pines takes from pi: it consumes a plain
+  `←` on an empty editor and reports `leave`; the daemon relays it to the
+  attached client. The daemon's `@xterm/headless` screen state serves the
+  live-screen preview as croppable styled lines (`screen`), separate from the
+  replay snapshot attach uses.
 
 ## Development
 

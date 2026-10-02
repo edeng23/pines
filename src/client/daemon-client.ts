@@ -18,10 +18,14 @@ import { socketPath } from "../shared/paths.js";
 import { ensureDaemon } from "../daemon/lifecycle.js";
 
 export interface DaemonClientEvents {
-  forest_update: [{ upsert?: TreeSummary[]; remove?: string[] }];
+  forest_update: [
+    { upsert?: TreeSummary[]; remove?: string[]; renamed?: Array<{ from: string; to: string }> },
+  ];
   output: [string, Buffer]; // treeId, bytes
   agent_exit: [string, number | null];
   toast: [{ level: "info" | "warn" | "error"; text: string; treeId?: string }];
+  /** The attached pi asked to be left (its extension consumed a plain ←). */
+  leave: [string]; // treeId
   close: [];
 }
 
@@ -77,7 +81,7 @@ export class DaemonClient extends EventEmitter<DaemonClientEvents> {
         );
         return;
       case "forest_update":
-        this.emit("forest_update", { upsert: msg.upsert, remove: msg.remove });
+        this.emit("forest_update", { upsert: msg.upsert, remove: msg.remove, renamed: msg.renamed });
         return;
       case "output":
         this.emit("output", msg.treeId, Buffer.from(msg.data, "base64"));
@@ -87,6 +91,9 @@ export class DaemonClient extends EventEmitter<DaemonClientEvents> {
         return;
       case "toast":
         this.emit("toast", { level: msg.level, text: msg.text, treeId: msg.treeId });
+        return;
+      case "leave":
+        this.emit("leave", msg.treeId);
         return;
       case "result":
       case "attach_ok": {
