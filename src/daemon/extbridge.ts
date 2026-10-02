@@ -48,6 +48,8 @@ export class ExtBridge {
       isAttached: (treeId: string) => boolean;
       /** Fired when an agent settles to idle (queued navigations run here). */
       onSettled?: (treeId: string) => void;
+      /** The pi asked to be left (plain ← on an empty editor): tell its clients. */
+      onLeave?: (treeId: string) => void;
       log: (msg: string) => void;
     },
   ) {}
@@ -164,6 +166,9 @@ export class ExtBridge {
       case "session_name":
         rec.name = ev.name ?? rec.name;
         this.supervisor.notify(rec);
+        break;
+      case "leave":
+        this.hooks.onLeave?.(rec.treeId);
         break;
     }
   }

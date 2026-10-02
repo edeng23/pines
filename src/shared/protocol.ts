@@ -9,7 +9,7 @@
  */
 import type { SearchHit, SimilarHit, TreeDetail, TreeStatus, TreeSummary } from "./types.js";
 
-export const PROTOCOL_VERSION = 3;
+export const PROTOCOL_VERSION = 4;
 
 /* ---------------------------------- client → daemon ---------------------------------- */
 
@@ -139,6 +139,17 @@ export interface SimilarMsg {
   k?: number;
 }
 
+/**
+ * The live agent's visible screen as styled lines, cropped to `cols` cells —
+ * for the forest's preview pane. Nothing is attached or resized by asking.
+ */
+export interface ScreenMsg {
+  t: "screen";
+  id: string;
+  treeId: string;
+  cols: number;
+}
+
 export interface ShutdownMsg {
   t: "shutdown";
 }
@@ -162,6 +173,7 @@ export type ClientToDaemon =
   | SetFolderMsg
   | RelayoutMsg
   | SimilarMsg
+  | ScreenMsg
   | ShutdownMsg;
 
 /* ---------------------------------- daemon → client ---------------------------------- */
@@ -188,6 +200,13 @@ export interface ForestUpdate {
   t: "forest_update";
   upsert?: TreeSummary[];
   remove?: string[];
+  /**
+   * A tree changed identity (a spawned record adopted the id the session
+   * watcher had already filed its file under). Clients holding `from` —
+   * attached, viewing, selected — follow it to `to`; the daemon has already
+   * moved their attachment.
+   */
+  renamed?: Array<{ from: string; to: string }>;
 }
 
 export interface AttachOk {
@@ -226,6 +245,8 @@ export interface ResultMsg {
   similar?: SimilarHit[];
   /** get_tree result */
   tree?: TreeDetail;
+  /** screen result: one styled line per PTY row (SGR only, no cursor moves). */
+  screen?: string[];
 }
 
 export interface ToastMsg {
@@ -233,6 +254,15 @@ export interface ToastMsg {
   level: "info" | "warn" | "error";
   text: string;
   treeId?: string;
+}
+
+/**
+ * The attached pi asked to be left: its extension consumed a plain ← on an
+ * empty editor (see pines-extension.ts). Sent only to clients attached to it.
+ */
+export interface LeaveMsg {
+  t: "leave";
+  treeId: string;
 }
 
 export type DaemonToClient =
@@ -243,7 +273,8 @@ export type DaemonToClient =
   | OutputMsg
   | AgentExitMsg
   | ResultMsg
-  | ToastMsg;
+  | ToastMsg
+  | LeaveMsg;
 
 /* -------------------------------- extension → daemon --------------------------------- */
 
@@ -267,7 +298,8 @@ export type ExtensionEventType =
   | "session_tree"
   | "session_switch"
   | "session_name"
-  | "session_shutdown";
+  | "session_shutdown"
+  | "leave";
 
 export interface ExtensionEvent {
   t: "ev";

@@ -55,7 +55,13 @@ import {
   type FolderViewState,
 } from "./forest/folders.js";
 import { folderParent, inFolder, normalizeFolder } from "../shared/folders.js";
-import { loadUiState, saveUiState } from "./uistate.js";
+import { loadUiState, saveUiState, FOREST_PANES, type ForestPane } from "./uistate.js";
+import {
+  framePreview,
+  previewHeader,
+  renderConversationPreview,
+  renderScreenPreview,
+} from "./forest/preview.js";
 import {
   decodeKittyPrintable,
   isKeyRelease,
@@ -371,6 +377,184 @@ export async function runApp(): Promise<void> {
 
   let pickMap = new Map<number, string>();
 
+  /* -------------------------------- preview -------------------------------- */
+
+  // The right pane can show the selected conversation instead of the canopy
+  // (ui.forestPane, `v` cycles). Scroll is the user's offset from the tail
+  // and resets whenever the previewed conversation changes.
+  let previewFor: string | null = null;
+  let previewOffset = 0;
+  /** Built conversation view, memoized on forest + detail versions. */
+  let previewCache: { rootId: string; forest: number; detail: number; view: ConvView } | null =
+    null;
+  /** Bumped when a get_tree result lands; invalidates previewCache. */
+  let detailVersion = 0;
+  /** Last live screen handed out by the daemon for the previewed agent. */
+  let screenCache: { treeId: string; lines: string[] } | null = null;
+  let screenTimer: NodeJS.Timeout | null = null;
+  let screenInFlight = false;
+
+  /** The live member whose screen the preview shows (attach's own pick). */
+  function previewLiveMember(rootId: string): TreeSummary | null {
+    const live = familyMembers(rootId).filter((m) => m.live && m.status !== "crashed");
+    if (live.length === 0) return null;
+    return live.length > 1 ? attentionMemberOf(live) : live[0]!;
+  }
+
+  /** Family root of the conversation under the cursor, or null on a folder row. */
+  function previewRootId(): string | null {
+    if (cursorFolder || !selectedId) return null;
+    return forest.has(selectedId) ? familyRootId(selectedId) : null;
+  }
+
+  function previewView(rootId: string): ConvView {
+    if (
+      previewCache &&
+      previewCache.rootId === rootId &&
+      previewCache.forest === forestVersion &&
+      previewCache.detail === detailVersion
+    ) {
+      return previewCache.view;
+    }
+    const view = buildConvView({
+      rootTreeId: rootId,
+      detailOf: (id) => sessionDetails.get(id),
+      summaryOf,
+      childrenOf,
+      parentOf,
+      expandedRuns: new Set(),
+      unfolded: new Set(),
+      viewportH: vp().height,
+      wantDetail: fetchDetail,
+      flowTreeId: null,
+    });
+    previewCache = { rootId, forest: forestVersion, detail: detailVersion, view };
+    return view;
+  }
+
+  /**
+   * Render the preview pane for the current selection. Screen mode with no
+   * live agent falls back to the conversation rather than an empty pane: the
+   * question "what is this?" still has an answer.
+   */
+  function renderPreviewPane(view: Viewport): string[] {
+    const rootId = previewRootId();
+    if (rootId !== previewFor) {
+      previewFor = rootId;
+      previewOffset = 0;
+    }
+    const now = Date.now();
+    const tree = rootId ? (conversations().find((t) => t.treeId === rootId) ?? null) : null;
+    const wantScreen = ui.forestPane === "screen";
+    const liveMember = rootId && wantScreen ? previewLiveMember(rootId) : null;
+    const body: "conversation" | "screen" = liveMember ? "screen" : "conversation";
+    const header = previewHeader({
+      tree,
+      body,
+      fallback: wantScreen && !liveMember,
+      width: view.width,
+      spinnerFrame,
+      now,
+    });
+    const bodyH = view.height - 1;
+    let lines: string[];
+    if (!rootId) {
+      lines = [` \x1b[${MUTED}m↑/↓ pick a conversation in the sidebar · v returns to the forest\x1b[0m`];
+    } else if (liveMember) {
+      const cached = screenCache?.treeId === liveMember.treeId ? screenCache.lines : null;
+      lines = renderScreenPreview(cached, { width: view.width, height: bodyH });
+    } else {
+      lines = renderConversationPreview(previewView(rootId), {
+        width: view.width,
+        height: bodyH,
+        panelW: ui.sidebarWidth,
+        spinnerFrame,
+        now,
+        offset: previewOffset,
+      });
+    }
+    return framePreview(header, lines, view.height);
+  }
+
+  /**
+   * Live screen polling: only while the forest shows a screen preview of a
+   * live agent. A peek, not an attach — the daemon neither resizes the PTY
+   * nor marks the tree seen.
+   */
+  function syncScreenPoll(): void {
+    const rootId = mode.kind === "forest" && ui.forestPane === "screen" ? previewRootId() : null;
+    const member = rootId ? previewLiveMember(rootId) : null;
+    if (!member) {
+      if (screenTimer) {
+        clearInterval(screenTimer);
+        screenTimer = null;
+      }
+      return;
+    }
+    if (screenTimer) return;
+    const poll = () => {
+      const rid = mode.kind === "forest" && ui.forestPane === "screen" ? previewRootId() : null;
+      const m = rid ? previewLiveMember(rid) : null;
+      if (!m) {
+        // Left the screen preview (another pane, a tree, an attach): stop.
+        if (screenTimer) clearInterval(screenTimer);
+        screenTimer = null;
+        return;
+      }
+      if (screenInFlight) return;
+      screenInFlight = true;
+      void client
+        .request({ t: "screen", id: client.rid(), treeId: m.treeId, cols: forestVp().width })
+        .then((res) => {
+          if (res.ok && res.screen) {
+            screenCache = { treeId: m.treeId, lines: res.screen };
+            requestRender();
+          }
+        })
+        .catch(() => {})
+        .finally(() => {
+          screenInFlight = false;
+        });
+    };
+    poll();
+    screenTimer = setInterval(poll, 200);
+    screenTimer.unref();
+  }
+
+  /** `v`: canvas → conversation → screen (live agents only) → canvas. */
+  function cycleForestPane(): void {
+    const rootId = previewRootId();
+    let next: ForestPane =
+      FOREST_PANES[(FOREST_PANES.indexOf(ui.forestPane) + 1) % FOREST_PANES.length]!;
+    // No live agent to peek at: the screen state would only show the
+    // conversation again, so skip straight back to the forest.
+    if (next === "screen" && !(rootId && previewLiveMember(rootId))) next = "canvas";
+    ui.forestPane = next;
+    saveUiState(ui);
+    const hasLive = Boolean(rootId && previewLiveMember(rootId));
+    showToast(
+      next === "canvas"
+        ? "forest"
+        : next === "conversation"
+          ? `preview: conversation (v again: ${hasLive ? "live screen" : "forest"})`
+          : "preview: live screen",
+    );
+    out.write("\x1b[2J");
+    requestRender();
+  }
+
+  /** j/k or the wheel over a preview: move the window; clamping is the renderer's. */
+  function scrollPreview(delta: number): void {
+    const rootId = previewRootId();
+    // Only a conversation body scrolls (a live screen is what it is) — that
+    // includes the screen state's fallback when no agent is live.
+    if (!rootId || (ui.forestPane === "screen" && previewLiveMember(rootId))) return;
+    if (ui.forestPane === "canvas") return;
+    const rows = previewView(rootId).rows.length;
+    previewOffset = Math.max(-rows, Math.min(rows, previewOffset + delta));
+    requestRender();
+  }
+
   /* ------------------------------- rendering ------------------------------- */
 
   let renderQueued = false;
@@ -478,17 +662,25 @@ export async function runApp(): Promise<void> {
     let hints: string;
     if (mode.kind === "forest") {
       const cvp = forestVp();
-      const canvas = new Canvas(cvp.width, cvp.height);
-      pickMap = renderForest(canvas, {
-        trees: conversations(),
-        camera,
-        vp: cvp,
-        // A cursor on a folder row highlights nothing on the canvas.
-        selectedId: cursorFolder ? null : selectedId,
-        spinnerFrame,
-      });
-      lastCanvas = canvas; // retained for mouse hit-testing
-      body = canvas.render();
+      if (ui.forestPane !== "canvas") {
+        // Preview instead of the canopy: no canvas, so no canvas hits.
+        pickMap = new Map();
+        lastCanvas = null;
+        body = renderPreviewPane(cvp);
+      } else {
+        const canvas = new Canvas(cvp.width, cvp.height);
+        pickMap = renderForest(canvas, {
+          trees: conversations(),
+          camera,
+          vp: cvp,
+          // A cursor on a folder row highlights nothing on the canvas.
+          selectedId: cursorFolder ? null : selectedId,
+          spinnerFrame,
+        });
+        lastCanvas = canvas; // retained for mouse hit-testing
+        body = canvas.render();
+      }
+      syncScreenPoll();
       const sw = sidebarW();
       if (sw > 0) {
         const convs = conversations();
@@ -516,7 +708,9 @@ export async function runApp(): Promise<void> {
       }
       // Ordered by importance — narrow terminals truncate from the right.
       hints =
-        "→ open · ↵ attach · / search · m folder · f fold · s similar · n new · r rename · ± zoom · S sidebar · q quit ";
+        ui.forestPane === "canvas"
+          ? "→ open · ↵ attach · v preview · / search · m folder · f fold · s similar · n new · r rename · ± zoom · S sidebar · q quit "
+          : "→ open · ↵ attach · v forest/screen · j/k scroll · / search · m folder · s similar · n new · r rename · S sidebar · q quit ";
     } else {
       body = renderTreeBody(view);
       // The selected row explains what ⏎ does there; keep the bar terse and
@@ -638,6 +832,7 @@ export async function runApp(): Promise<void> {
       .then((res) => {
         if (res.ok && res.tree) {
           sessionDetails.set(treeId, res.tree);
+          detailVersion++;
           rebuildConv();
           requestRender();
         }
@@ -753,6 +948,7 @@ export async function runApp(): Promise<void> {
       return;
     }
     sessionDetails.set(rootId, res.tree);
+    detailVersion++;
     const treeMode: ViewMode & { kind: "tree" } = {
       kind: "tree",
       rootId,
@@ -1000,6 +1196,8 @@ export async function runApp(): Promise<void> {
         "forest   o=jump to attention  0=fit all  r/L=rename tree",
         "forest   A/ctrl+x=archive/unarchive tree  .=show/hide archived",
         "forest   s=similar conversations (semantic neighbors of the selection)",
+        "forest   v=preview pane: forest → conversation → live screen (live agents) → forest",
+        "preview  j/k or wheel=scroll · →=open the tree · ↵=attach · the sidebar still selects",
         "folders  m=file the tree in a folder (+ new folder…, a/b nests, − unfile)",
         "folders  ↑/↓ reach folder rows · f/←=fold  →/↵=unfold · ←=climb once folded",
         "folders  r on a folder row renames it · n on a folder row starts a tree in it",
@@ -1008,6 +1206,7 @@ export async function runApp(): Promise<void> {
         "tree     f=flow (one branch's conversation) ⇄ full tree",
         "tree     Tab/shift+Tab=next/prev branch (in flow: switches the flow)  1-9=nth",
         "tree     b=branch menu  L=label  r=rename this tree (its forest name)",
+        `pi view  ← on an EMPTY editor=back to the tree (with text, ← is pi's cursor)`,
         `pi view  ${prefixName} ←/d=tree  ${prefixName} f=forest  ${prefixName} n=next attention`,
         `pi view  ${prefixName} ${prefixName}=send ${prefixName} to pi itself`,
         "search   / from forest or tree · ↑/↓ select · ↵ jump",
@@ -1449,7 +1648,7 @@ export async function runApp(): Promise<void> {
     const width = out.columns ?? 80;
     const row = out.rows ?? 24;
     const left = ` \x1b[1mpines\x1b[0m ▸ ${name} ▸ pi`;
-    const hints = "ctrl+t ← tree · ctrl+t f forest · ctrl+t n next · ctrl+t ctrl+t sends ctrl+t ";
+    const hints = "← on an empty editor: tree · ctrl+t ← tree · ctrl+t f forest · ctrl+t n next · ctrl+t ctrl+t sends ctrl+t ";
     const plainLen = visibleLength(left);
     let h = hints;
     const avail = width - 1 - plainLen - 1;
@@ -1494,8 +1693,22 @@ export async function runApp(): Promise<void> {
 
   /* ------------------------------ event wiring ----------------------------- */
 
-  client.on("forest_update", ({ upsert, remove }) => {
+  client.on("forest_update", ({ upsert, remove, renamed }) => {
     forestVersion++;
+    // Identity followed the session file (see ForestUpdate.renamed): every
+    // place that holds the old id moves before the removal below lands.
+    for (const { from, to } of renamed ?? []) {
+      if (mode.kind === "attached" && mode.treeId === from) mode = { kind: "attached", treeId: to };
+      else if (mode.kind === "tree" && mode.rootId === from) mode.rootId = to;
+      if (selectedId === from) selectedId = to;
+      if (previewFor === from) previewFor = to;
+      if (screenCache?.treeId === from) screenCache = { ...screenCache, treeId: to };
+      const detail = sessionDetails.get(from);
+      if (detail) {
+        sessionDetails.delete(from);
+        sessionDetails.set(to, { ...detail, treeId: to });
+      }
+    }
     let newest: TreeSummary | undefined;
     for (const t of upsert ?? []) {
       const prev = forest.get(t.treeId);
@@ -1560,6 +1773,12 @@ export async function runApp(): Promise<void> {
   });
 
   client.on("toast", ({ text }) => showToast(text));
+
+  // The attached pi's extension consumed a plain ← on an empty editor: step
+  // back out to the tree, exactly as the prefix chord would.
+  client.on("leave", (treeId) => {
+    if (mode.kind === "attached" && mode.treeId === treeId) detachToTree();
+  });
 
   client.on("close", () => {
     cleanup();
@@ -1746,17 +1965,26 @@ export async function runApp(): Promise<void> {
       // selected tree, ← is already at the top level. Panning stays on hjkl
       // (and drag): arrows navigate, letters move the camera.
       case "h":
+        if (ui.forestPane !== "canvas") return;
         camera = { ...camera, cx: camera.cx - pan };
         break;
       case "l":
+        if (ui.forestPane !== "canvas") return;
         camera = { ...camera, cx: camera.cx + pan };
         break;
       case "k":
+        // In a preview the pane is a transcript: j/k scroll it instead of
+        // panning a canvas nobody can see.
+        if (ui.forestPane !== "canvas") return scrollPreview(-1);
         camera = { ...camera, cy: camera.cy - pan };
         break;
       case "j":
+        if (ui.forestPane !== "canvas") return scrollPreview(1);
         camera = { ...camera, cy: camera.cy + pan };
         break;
+      case "v":
+        cycleForestPane();
+        return;
       case "\x1b[A":
         if (sidebarW() > 0) stepSidebarSelection(-1);
         else cycleSelection(-1);
@@ -2129,6 +2357,23 @@ export async function runApp(): Promise<void> {
         onSidebarMouse(ev);
         return;
       }
+    }
+
+    if (ui.forestPane !== "canvas") {
+      // The pane is a preview: the wheel scrolls it, a double-click opens the
+      // conversation, and there is nothing to drag or pick.
+      if (ev.kind === "wheel-up") return scrollPreview(-3);
+      if (ev.kind === "wheel-down") return scrollPreview(3);
+      if (ev.kind === "press" && ev.button === 0 && selectedId) {
+        const now = Date.now();
+        if (lastClick && lastClick.pane === "canvas" && lastClick.treeId === selectedId && now - lastClick.at < 350) {
+          lastClick = null;
+          void openTree(selectedId);
+          return;
+        }
+        lastClick = { treeId: selectedId, at: now, pane: "canvas" };
+      }
+      return;
     }
 
     // Canvas events are in canvas-local coordinates.

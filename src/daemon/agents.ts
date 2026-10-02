@@ -9,6 +9,7 @@ import pty from "node-pty";
 import xterm from "@xterm/headless";
 import { SerializeAddon } from "@xterm/addon-serialize";
 import { ensureNodePtyReady } from "./pty-compat.js";
+import { screenLines } from "./screen.js";
 
 export interface AgentProcOptions {
   treeId: string;
@@ -112,6 +113,15 @@ export class AgentProc {
   /** Immediate (non-debounced) serialize — used when the process has exited. */
   snapshotSync(scrollback = 2000): string {
     return this.serializer.serialize({ scrollback });
+  }
+
+  /**
+   * The visible screen as croppable styled lines (see screen.ts) — a peek
+   * for the forest's preview pane. Unlike attach, nothing is resized: the
+   * PTY stays at the attached client's size and the caller crops to `cols`.
+   */
+  screenLines(cols: number): string[] {
+    return screenLines(this.term, cols);
   }
 
   kill(signal: "SIGTERM" | "SIGKILL" = "SIGTERM"): void {
