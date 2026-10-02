@@ -121,7 +121,7 @@ describe("previewHeader", () => {
     const h = strip(
       previewHeader({ tree: t, body: "conversation", fallback: true, width: 100, spinnerFrame: 0, now }),
     );
-    expect(h).toContain("no live agent, showing conversation");
+    expect(h).toContain("no live agent · showing conversation");
     const live = strip(previewHeader({ tree: t, body: "screen", width: 100, spinnerFrame: 0, now }));
     expect(live).toContain("live screen");
   });
@@ -169,6 +169,17 @@ describe("conversation preview", () => {
       offset: 0,
     });
     expect(lines.map(strip).join("\n")).toContain("agents on this tree — 2");
+  });
+
+  it("drops the agents panel in a narrow pane so the transcript keeps its room", () => {
+    const view = familyView({ kidStatus: "running" });
+    const narrow = renderConversationPreview(view, {
+      width: 60, height: 14, panelW: 32, spinnerFrame: 0, now: 1000, offset: 0,
+    });
+    const text = narrow.map(strip).join("\n");
+    expect(text).not.toContain("agents on this tree");
+    expect(text).toContain("working"); // the tip still says what the agent is doing
+    for (const l of narrow) expect(visibleLength(l)).toBeLessThanOrEqual(60);
   });
 
   it("anchors at the tail with the leaf on screen; offsets move the window and clamp", () => {

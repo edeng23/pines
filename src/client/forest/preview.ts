@@ -27,6 +27,9 @@ const RESET = "\x1b[0m";
 
 export type PreviewBody = "conversation" | "screen";
 
+/** Below this pane width the conversation preview drops its agents panel. */
+export const PANEL_MIN_PANE_W = 72;
+
 function stateWord(t: TreeSummary): string {
   if (t.status === "running") return "working";
   if (t.status === "waiting") return t.seen ? "waiting" : "needs input";
@@ -57,18 +60,30 @@ export function previewHeader(opts: {
       ` ${glyph} ${bold}${treeTitle(tree).title}${RESET}` +
       `\x1b[${MUTED}m · ${stateWord(tree)} · ${humanAge(tree.mtime, opts.now)}${RESET}`;
   }
-  const what = opts.fallback
-    ? "screen · no live agent, showing conversation"
+  // Right side: what the pane shows and how to change it. Degrade in steps
+  // when the row is tight — a long title must never silence the one label
+  // that explains a fallback — and clip the title before dropping the label.
+  const labels = opts.fallback
+    ? ["no live agent · showing conversation", "no live agent → conversation"]
     : opts.body === "screen"
-      ? "live screen"
-      : "conversation";
-  const right = `\x1b[${MUTED}m${what} \x1b[${FAINT}m· v cycles${RESET} `;
+      ? ["live screen", "live screen"]
+      : ["conversation", "conversation"];
+  const rights = [
+    `\x1b[${MUTED}m${labels[0]} \x1b[${FAINT}m· v cycles${RESET} `,
+    `\x1b[${MUTED}m${labels[1]}${RESET} `,
+  ];
   const leftLen = visibleLength(left);
-  const rightLen = visibleLength(right);
-  if (leftLen + rightLen + 1 > opts.width) {
-    return clipAnsi(left, opts.width);
+  for (const right of rights) {
+    const rightLen = visibleLength(right);
+    if (leftLen + rightLen + 1 <= opts.width) {
+      return `${left}${" ".repeat(opts.width - leftLen - rightLen)}${right}`;
+    }
   }
-  return `${left}${" ".repeat(opts.width - leftLen - rightLen)}${right}`;
+  const short = rights[1]!;
+  const shortLen = visibleLength(short);
+  const room = opts.width - shortLen - 1;
+  if (room >= 16) return `${clipAnsi(left, room)} ${short}`;
+  return clipAnsi(left, opts.width);
 }
 
 /**
@@ -105,14 +120,18 @@ export function renderConversationPreview(
     while (lines.length < opts.height) lines.push("");
     return lines;
   }
-  const lay = convLayout(view, opts.width, opts.height, opts.panelW);
+  // The agents panel needs its 24-cell minimum; in a pane this narrow that
+  // would leave the transcript a sliver, so the panel steps aside — the tips
+  // still carry every agent's status inline.
+  const panelW = opts.width >= PANEL_MIN_PANE_W ? opts.panelW : 0;
+  const lay = convLayout(view, opts.width, opts.height, panelW);
   const scroll = previewScroll(view, lay.textH, opts.offset);
   return renderConversation(view, {
     selected: -1, // no cursor: this is a peek, not a place
     scroll,
     height: opts.height,
     width: opts.width,
-    panelW: opts.panelW,
+    panelW,
     spinnerFrame: opts.spinnerFrame,
     now: opts.now,
   }).lines;

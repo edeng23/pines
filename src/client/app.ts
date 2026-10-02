@@ -603,7 +603,8 @@ export async function runApp(): Promise<void> {
     // Clickable zoom-to-fit button (forest only). Cell range is remembered
     // for the mouse handler; the '0' key does the same thing.
     fitButton = null;
-    if (mode.kind === "forest" && !overlay) {
+    // Only while the canvas is showing: a preview has nothing to fit.
+    if (mode.kind === "forest" && !overlay && ui.forestPane === "canvas") {
       const x0 = strip(left).length + 1;
       const label = "[⛶ fit]";
       fitButton = { x0, x1: x0 + label.length - 1 };
